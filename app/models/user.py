@@ -27,6 +27,10 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         is_verified: bool
     """
 
+    # Override the singular "user" default from SQLAlchemyBaseUserTableUUID
+    # so foreign keys can target "users.id" consistently across the schema.
+    __tablename__ = "users"
+
     role: Mapped[str] = mapped_column(
         String(20),
         default=UserRole.TESTER.value,
