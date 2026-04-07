@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import admin_users as admin_users_api
+from app.api import runs as runs_api
 from app.auth.users import auth_backend, fastapi_users
 from app.db import Base, engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
@@ -70,3 +72,7 @@ app.include_router(
     prefix="/users",
     tags=["users"],
 )
+
+# --- Application API ---------------------------------------------------------
+app.include_router(runs_api.router)
+app.include_router(admin_users_api.router)
