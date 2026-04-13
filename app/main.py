@@ -1,32 +1,75 @@
 """Testing Agent backend — FastAPI entrypoint."""
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import admin_users as admin_users_api
+from app.api import devices as devices_api
+from app.api import agent_settings as agent_settings_api
+from app.api import app_uploads as app_uploads_api
+from app.api import download_ws as download_ws_api
+from app.api import hf_models as hf_models_api
+from app.api import internal_runs as internal_runs_api
+from app.api import knowledge as knowledge_api
+from app.api import llm_models as llm_models_api
+from app.api import run_mirror as run_mirror_api
+from app.api import profile as profile_api
+from app.api import run_ws as run_ws_api
 from app.api import runs as runs_api
+from app.api import scenarios as scenarios_api
+from app.api import test_data as test_data_api
 from app.auth.users import auth_backend, fastapi_users
-from app.db import Base, engine
+from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
     AgentSettings,
+    DeviceConfig,
     Edge,
+    KnowledgeChunk,
+    KnowledgeDocument,
     LLMModel,
     Run,
+    Scenario,
     Screen,
+    TestData,
     User,
 )
 from app.schemas.user import UserRead, UserUpdate
-from app.seed import seed_initial_admin
+from app.seed import seed_initial_admin, seed_initial_models
+
+logger = logging.getLogger(__name__)
+
+
+def _run_migrations_sync() -> None:
+    """Run `alembic upgrade head` synchronously.
+
+    Must be called from a worker thread (via run_in_executor), NOT
+    from the main event loop: alembic's env.py wraps its online
+    migration runner in ``asyncio.run()``, which would blow up with
+    "asyncio.run() cannot be called from a running event loop" if
+    invoked directly from the FastAPI lifespan coroutine.
+    """
+    # Relative path resolves against the container's WORKDIR (/app),
+    # which is where the Dockerfile copies alembic.ini to.
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "head")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables (Alembic will replace this in a later iteration)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Startup: apply migrations, then seed.
+    logger.info("Running alembic upgrade head…")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _run_migrations_sync)
+    logger.info("Migrations complete.")
+
     await seed_initial_admin()
+    await seed_initial_models()
     yield
     await engine.dispose()
 
@@ -75,4 +118,19 @@ app.include_router(
 
 # --- Application API ---------------------------------------------------------
 app.include_router(runs_api.router)
+app.include_router(app_uploads_api.router)
+app.include_router(devices_api.public_router)
+app.include_router(devices_api.admin_router)
 app.include_router(admin_users_api.router)
+app.include_router(llm_models_api.admin_router)
+app.include_router(llm_models_api.public_router)
+app.include_router(agent_settings_api.router)
+app.include_router(profile_api.router)
+app.include_router(internal_runs_api.router)
+app.include_router(hf_models_api.router)
+app.include_router(knowledge_api.router)
+app.include_router(run_mirror_api.router)
+app.include_router(scenarios_api.router)
+app.include_router(test_data_api.router)
+app.include_router(run_ws_api.router)
+app.include_router(download_ws_api.router)

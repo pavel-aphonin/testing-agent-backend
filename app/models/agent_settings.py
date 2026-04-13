@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,42 @@ class AgentSettings(Base):
     # PUCT hyperparameters
     c_puct: Mapped[float] = mapped_column(Float, default=2.0, nullable=False)
     rollout_depth: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+
+    # UI preference: which library renders the state graph on results page.
+    # One of: "react-flow", "cytoscape", "vis-network".
+    graph_library: Mapped[str] = mapped_column(
+        String(20), default="react-flow", nullable=False
+    )
+
+    # UI preference: interface language. One of: "en", "ru".
+    language: Mapped[str] = mapped_column(
+        String(10), default="en", nullable=False
+    )
+
+    # LLM role assignments — which model serves which purpose
+    vision_model_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    thinking_model_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    instruct_model_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    coder_model_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # RAG settings
+    rag_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

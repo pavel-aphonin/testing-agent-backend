@@ -7,18 +7,23 @@ Permission rules:
     - admin can delete any run; tester only their own; viewer cannot delete
 """
 
+import json
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.users import current_active_user, require_tester
+from app.config import settings
 from app.db import get_async_session
-from app.models.run import Run, RunStatus
+from app.models.device_config import DeviceConfig
+from app.models.run import Edge, Run, RunStatus, Screen
 from app.models.user import User, UserRole
-from app.schemas.run import RunCreate, RunRead
+from app.schemas.run import RunCreate, RunCreateV2, RunRead, RunResultRead
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -74,6 +79,58 @@ async def create_run(
     return run
 
 
+@router.post(
+    "/v2",
+    response_model=RunRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_tester)],
+)
+async def create_run_v2(
+    payload: RunCreateV2,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> Run:
+    """Create a run with automatic simulator provisioning (V2 flow).
+
+    The worker will create a fresh simulator/AVD, install the uploaded
+    app, launch it, and tear it down after the run completes.
+    """
+    # Verify the app upload exists
+    meta_path = Path(settings.app_uploads_dir) / payload.app_file_id / "meta.json"
+    if not meta_path.exists():
+        raise HTTPException(400, "App upload not found. Upload the app first.")
+    meta = json.loads(meta_path.read_text())
+
+    # Verify the device config exists and is active
+    result = await session.execute(
+        select(DeviceConfig).where(DeviceConfig.id == payload.device_config_id)
+    )
+    device_config = result.scalar_one_or_none()
+    if device_config is None:
+        raise HTTPException(400, "Device configuration not found")
+    if not device_config.is_active:
+        raise HTTPException(400, "This device configuration is disabled")
+
+    run = Run(
+        user_id=user.id,
+        bundle_id=meta["bundle_id"],
+        device_id="__PENDING__",  # populated by worker after sim creation
+        platform=meta["platform"],
+        mode=payload.mode,
+        max_steps=payload.max_steps,
+        c_puct=payload.c_puct,
+        rollout_depth=payload.rollout_depth,
+        status=RunStatus.PENDING.value,
+        device_type=device_config.device_identifier,
+        os_version=device_config.os_identifier,
+        app_file_path=meta["app_relative_path"],
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
 @router.get("/{run_id}", response_model=RunRead)
 async def get_run(
     run_id: UUID,
@@ -87,6 +144,69 @@ async def get_run(
     if not _is_admin(user) and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
     return run
+
+
+@router.get("/{run_id}/results", response_model=RunResultRead)
+async def get_run_results(
+    run_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> RunResultRead:
+    """Return the run together with all discovered screens and edges.
+
+    Used by the Results page after exploration finishes. The same row-level
+    permission rules as GET /api/runs/{id} apply.
+    """
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _is_admin(user) and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+
+    screens_q = await session.execute(
+        select(Screen)
+        .where(Screen.run_id == run_id)
+        .order_by(Screen.first_seen_at.asc())
+    )
+    edges_q = await session.execute(
+        select(Edge).where(Edge.run_id == run_id).order_by(Edge.step_idx.asc())
+    )
+
+    return RunResultRead(
+        run=RunRead.model_validate(run),
+        screens=[s for s in screens_q.scalars().all()],
+        edges=[e for e in edges_q.scalars().all()],
+    )
+
+
+@router.get("/{run_id}/screens/{screen_hash}/screenshot")
+async def get_screen_screenshot(
+    run_id: UUID,
+    screen_hash: str,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+):
+    """Serve a screenshot PNG for a specific screen."""
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _is_admin(user) and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+
+    screen_result = await session.execute(
+        select(Screen).where(Screen.run_id == run_id, Screen.screen_id_hash == screen_hash)
+    )
+    screen = screen_result.scalar_one_or_none()
+    if screen is None or not screen.screenshot_path:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    file_path = Path(settings.app_uploads_dir) / screen.screenshot_path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Screenshot file missing")
+
+    return FileResponse(file_path, media_type="image/png")
 
 
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

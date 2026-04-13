@@ -85,6 +85,12 @@ class Run(Base):
     # Stats summary (denormalized for fast list queries)
     stats_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Simulator auto-provisioning (V2 flow). Nullable because the legacy
+    # flow (V1) sends a pre-existing device_id and doesn't need these.
+    device_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    os_version: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    app_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Path on disk for the explorer output dir (graph.json, screenshots, etc.)
     output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
 
