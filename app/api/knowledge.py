@@ -241,6 +241,60 @@ async def delete_document(
     await session.commit()
 
 
+@router.post(
+    "/documents/{document_id}/reembed",
+    response_model=KnowledgeDocumentSummary,
+)
+async def reembed_document(
+    document_id: UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> KnowledgeDocument:
+    """Re-embed all chunks of a document with the current embedding model.
+
+    Used to rescue documents stuck on `fake-hash-*` (uploaded while the
+    real embedding server was down). Re-runs chunking + embedding on the
+    original `content` and replaces the existing chunks atomically.
+    """
+    document = (
+        await session.execute(
+            select(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
+        )
+    ).scalar_one_or_none()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    chunks = split_into_chunks(document.content)
+    if not chunks:
+        raise HTTPException(400, "Document is empty after re-chunking")
+
+    embedder = EmbeddingClient()
+    try:
+        embedding_result = await embedder.embed(chunks)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    # Replace chunks atomically: delete old, insert new, update parent metadata.
+    await session.execute(
+        delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document.id)
+    )
+    for idx, (text, vec) in enumerate(zip(chunks, embedding_result.vectors)):
+        session.add(
+            KnowledgeChunk(
+                document_id=document.id,
+                chunk_idx=idx,
+                text=text,
+                embedding=vec,
+            )
+        )
+    document.embedding_model = embedding_result.model_name
+    document.embedding_dim = embedding_result.dim
+    document.chunk_count = len(chunks)
+    await session.commit()
+    await session.refresh(document)
+    return document
+
+
 # --------------------------------------------------------- LLM answer ----
 
 _logger = logging.getLogger(__name__)

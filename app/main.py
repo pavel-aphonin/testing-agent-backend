@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import admin_users as admin_users_api
+from app.api import assistant as assistant_api
 from app.api import defects as defects_api
 from app.api import devices as devices_api
 from app.api import agent_settings as agent_settings_api
@@ -25,6 +26,7 @@ from app.api import run_ws as run_ws_api
 from app.api import runs as runs_api
 from app.api import scenarios as scenarios_api
 from app.api import test_data as test_data_api
+from app.api import worker_status as worker_status_api
 from app.auth.users import auth_backend, fastapi_users
 from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
@@ -136,5 +138,8 @@ app.include_router(scenarios_api.router)
 app.include_router(test_data_api.router)
 app.include_router(defects_api.public_router)
 app.include_router(defects_api.internal_router)
+app.include_router(worker_status_api.public_router)
+app.include_router(worker_status_api.internal_router)
+app.include_router(assistant_api.router)
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)
