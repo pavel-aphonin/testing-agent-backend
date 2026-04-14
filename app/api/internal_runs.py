@@ -220,6 +220,17 @@ async def post_run_event(
             screen.visit_count += 1
             if saved_screenshot_path:
                 screen.screenshot_path = saved_screenshot_path
+            # If the screen was first seen before its name could be derived
+            # (e.g. app still loading) and we now have a better name, upgrade
+            # it. We only overwrite known-placeholder names so a real heading
+            # is never replaced by something worse.
+            placeholders = {"Главный экран", "(unnamed)", "Без имени", ""}
+            if (
+                event.screen_name
+                and screen.name in placeholders
+                and event.screen_name not in placeholders
+            ):
+                screen.name = event.screen_name
 
     elif event.type == "edge_discovered":
         if not event.source_screen_hash or not event.target_screen_hash or not event.action_type:
