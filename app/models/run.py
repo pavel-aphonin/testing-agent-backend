@@ -101,6 +101,15 @@ class Run(Base):
     # depending on mode). See schemas/scenario.py for the step format.
     scenario_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
+    # When true, the agent's system prompt includes per-field-type validation
+    # variants (empty / overflow / XSS / SQL injection / unicode) so it
+    # systematically probes form validation. The DefectDetector then catches
+    # "app accepted invalid input" as a P1 validation defect. Adds 5-8x more
+    # steps per form, so off by default for free exploration.
+    pbt_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+
     # Relationships
     screens: Mapped[list["Screen"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"

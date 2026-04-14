@@ -132,6 +132,8 @@ async def claim_next_pending_run(
         test_data=test_data,
         # Pre-scripted scenarios to execute before free exploration
         scenarios=scenarios,
+        # Property-based testing of form validation
+        pbt_enabled=run.pbt_enabled,
     )
 
 

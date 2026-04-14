@@ -75,3 +75,6 @@ class RunClaimResponse(BaseModel):
     # `value` may contain {{test_data.key}} placeholders that the worker
     # substitutes from `test_data` before sending the action.
     scenarios: list[dict] = []
+    # Property-based testing — when true, the agent's prompt includes
+    # validation-probing variants for each field type.
+    pbt_enabled: bool = False

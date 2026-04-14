@@ -126,6 +126,7 @@ async def create_run_v2(
         app_file_path=meta["app_relative_path"],
         # Empty list = free exploration only. Non-empty = run scenarios first.
         scenario_ids=[str(sid) for sid in payload.scenario_ids] or None,
+        pbt_enabled=payload.pbt_enabled,
     )
     session.add(run)
     await session.commit()

@@ -35,6 +35,8 @@ class RunCreateV2(BaseModel):
     # The agent executes scenarios sequentially, then continues with free
     # exploration for the remaining max_steps.
     scenario_ids: list[UUID] = Field(default_factory=list)
+    # Property-based testing: probe form validation with edge-case values.
+    pbt_enabled: bool = False
 
 
 class RunRead(BaseModel):
