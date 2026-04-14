@@ -64,6 +64,7 @@ async def _build_snapshot(session: AsyncSession, run: Run) -> dict:
                 "name": s.name,
                 "visit_count": s.visit_count,
                 "screenshot_path": s.screenshot_path,
+                "first_seen_at": s.first_seen_at.isoformat() if s.first_seen_at else None,
             }
             for s in screens_q.scalars().all()
         ],
@@ -73,8 +74,10 @@ async def _build_snapshot(session: AsyncSession, run: Run) -> dict:
                 "source_screen_hash": e.source_screen_hash,
                 "target_screen_hash": e.target_screen_hash,
                 "action_type": e.action_type,
+                "action_details": e.action_details_json,
                 "step_idx": e.step_idx,
                 "success": e.success,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in edges_q.scalars().all()
         ],
