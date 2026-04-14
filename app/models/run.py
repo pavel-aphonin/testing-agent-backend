@@ -55,6 +55,11 @@ class Run(Base):
         index=True,
     )
 
+    # User-supplied display name. Optional in the API — if empty we
+    # render "Запуск от {created_at}" in the UI. Stored verbatim, no
+    # validation beyond length.
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     # Target app
     bundle_id: Mapped[str] = mapped_column(String(200), nullable=False)
     device_id: Mapped[str] = mapped_column(String(200), nullable=False)

@@ -48,8 +48,10 @@ async def _build_snapshot(session: AsyncSession, run: Run) -> dict:
         "run": {
             "id": str(run.id),
             "status": run.status,
+            "title": run.title,
             "bundle_id": run.bundle_id,
             "mode": run.mode,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
             "started_at": run.started_at.isoformat() if run.started_at else None,
             "finished_at": run.finished_at.isoformat() if run.finished_at else None,
             "error_message": run.error_message,

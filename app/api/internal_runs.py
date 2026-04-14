@@ -269,6 +269,9 @@ async def post_run_event(
             "new_status": event.new_status,
             "screen_id_hash": event.screen_id_hash,
             "screen_name": event.screen_name,
+            # is_new lets the UI suppress duplicate "Обнаружил новый экран"
+            # log lines when the agent re-visits a screen.
+            "is_new": event.is_new,
             "source_screen_hash": event.source_screen_hash,
             "target_screen_hash": event.target_screen_hash,
             "action_type": event.action_type,

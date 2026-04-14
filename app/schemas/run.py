@@ -23,6 +23,10 @@ class RunCreate(BaseModel):
 class RunCreateV2(BaseModel):
     """V2 run creation — worker auto-provisions simulator/emulator."""
 
+    # Optional user-supplied name for the run, e.g. "Smoke 2026-04-15".
+    # Empty/None = backend will not store anything; UI renders "Запуск от
+    # {created_at}" as a fallback.
+    title: str | None = Field(default=None, max_length=200)
     # Reference to the uploaded .app.zip / .ipa / .apk (from POST /api/uploads/app)
     app_file_id: str = Field(..., min_length=1, max_length=200)
     # Device config ID from the admin-curated list (GET /api/devices)
@@ -44,6 +48,7 @@ class RunRead(BaseModel):
 
     id: UUID
     user_id: UUID
+    title: str | None = None
     bundle_id: str
     device_id: str
     platform: str

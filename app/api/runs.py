@@ -113,6 +113,7 @@ async def create_run_v2(
 
     run = Run(
         user_id=user.id,
+        title=(payload.title or "").strip() or None,
         bundle_id=meta["bundle_id"],
         device_id="__PENDING__",  # populated by worker after sim creation
         platform=meta["platform"],
