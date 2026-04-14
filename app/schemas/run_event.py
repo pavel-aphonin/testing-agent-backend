@@ -63,3 +63,15 @@ class RunClaimResponse(BaseModel):
     device_type: str | None = None
     os_version: str | None = None
     app_file_path: str | None = None
+    # Test data the agent can use when filling form fields.
+    # Keyed by semantic name (e.g. "email", "password", "phone") — the agent
+    # picks the right entry based on what the field is asking for. Categorized
+    # in the DB but flattened here to simplify the worker.
+    test_data: dict[str, str] = {}
+    # Expanded scenarios to execute before free exploration (empty = free only).
+    # Each scenario has a title + steps; the worker walks them in order and
+    # then falls back to free exploration for the remaining max_steps.
+    # Step fields: screen_name, action, element_label, value?, expected_result?
+    # `value` may contain {{test_data.key}} placeholders that the worker
+    # substitutes from `test_data` before sending the action.
+    scenarios: list[dict] = []

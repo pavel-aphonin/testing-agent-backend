@@ -94,6 +94,13 @@ class Run(Base):
     # Path on disk for the explorer output dir (graph.json, screenshots, etc.)
     output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional scenarios to follow before free exploration. Stored as a JSON
+    # array of scenario UUIDs (as strings). Empty list = pure free exploration.
+    # When set, the worker expands each scenario into its steps_json and
+    # prepends them to the agent's action queue (or injects into the prompt
+    # depending on mode). See schemas/scenario.py for the step format.
+    scenario_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+
     # Relationships
     screens: Mapped[list["Screen"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"

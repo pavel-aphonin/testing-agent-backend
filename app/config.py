@@ -21,13 +21,21 @@ class Settings(BaseSettings):
     initial_admin_email: str = "admin@example.com"
     initial_admin_password: str = "change_me"
 
-    # LLM (chat completions)
+    # LLM (chat completions) — used by the agent during exploration.
+    # Default points at Gemma (small, fast, multimodal with mmproj).
     llm_base_url: str = "http://llm:8080"
+    # LLM for RAG answer generation — separate from the agent's chat LLM
+    # because RAG benefits from larger/better models (Qwen3-8B Instruct).
+    # Empty → falls back to llm_base_url.
+    rag_llm_base_url: str = ""
     # Embeddings: by default we share the chat URL, but on macOS we run
-    # a separate llama-server with a real embedding model (bge-small) on
-    # a second port because Gemma's 2560-dim embeddings exceed pgvector's
-    # HNSW max (2000) and don't match our `vector(384)` schema.
+    # a separate llama-server with a real embedding model (Qwen3-Embedding-8B)
+    # on a second port because Gemma's 2560-dim embeddings exceed pgvector's
+    # HNSW max (2000).
     embedding_base_url: str = ""  # empty → falls back to llm_base_url
+    # Reranker (Qwen3-Reranker-8B) — optional second stage after vector search.
+    # Empty → reranking is skipped and RAG uses vector-search order directly.
+    reranker_base_url: str = ""
     llm_models_dir: str = "/var/lib/llm-models"
     # llama-swap reads this YAML and watches it for changes; backend regenerates
     # it after every CRUD on llm_models. Lives in the shared bind-mount so the

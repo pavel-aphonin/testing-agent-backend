@@ -83,6 +83,38 @@ async def claim_next_pending_run(
         },
     )
 
+    # Load test data entries — the agent uses these to fill form fields.
+    from app.models.test_data import TestData
+    td_rows = (
+        await session.execute(select(TestData.key, TestData.value))
+    ).all()
+    test_data = {row.key: row.value for row in td_rows}
+
+    # Expand scenario IDs into full step payloads. The worker walks these
+    # before falling back to free exploration.
+    scenarios: list[dict] = []
+    if run.scenario_ids:
+        from app.models.scenario import Scenario
+        from uuid import UUID as _UUID
+        sc_rows = (
+            await session.execute(
+                select(Scenario)
+                .where(Scenario.id.in_([_UUID(sid) for sid in run.scenario_ids]))
+                .where(Scenario.is_active.is_(True))
+            )
+        ).scalars().all()
+        # Preserve the order the user specified, not DB order.
+        sc_by_id = {str(s.id): s for s in sc_rows}
+        for sid in run.scenario_ids:
+            s = sc_by_id.get(sid)
+            if s is None:
+                continue
+            scenarios.append({
+                "id": str(s.id),
+                "title": s.title,
+                "steps": (s.steps_json or {}).get("steps", []),
+            })
+
     return RunClaimResponse(
         run_id=run.id,
         bundle_id=run.bundle_id,
@@ -96,6 +128,10 @@ async def claim_next_pending_run(
         device_type=run.device_type,
         os_version=run.os_version,
         app_file_path=run.app_file_path,
+        # Test data for the agent to use when filling forms
+        test_data=test_data,
+        # Pre-scripted scenarios to execute before free exploration
+        scenarios=scenarios,
     )
 
 

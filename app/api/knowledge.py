@@ -246,12 +246,27 @@ async def delete_document(
 _logger = logging.getLogger(__name__)
 
 
+def _clean_model_output(text: str) -> str:
+    """Strip thinking tags and chat template artifacts."""
+    if not text:
+        return text
+    import re
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<\|im_end\|>|<\|im_start\|>|<turn\|>|</s>", "", text)
+    return text.strip()
+
+
 async def _generate_answer(
     question: str, matches: list[KnowledgeMatch],
-) -> str | None:
-    """Send retrieved chunks to the LLM and get a concise answer."""
+) -> tuple[str | None, list[str]]:
+    """Send retrieved chunks to the LLM and get a concise answer with citations.
+
+    Returns (answer, citations). `citations` is a list of exact phrases from the
+    source chunks that the answer is grounded in — the UI highlights these.
+    Returns ([], []) if the model couldn't produce an answer.
+    """
     if not matches:
-        return None
+        return None, []
 
     from app.config import settings
 
@@ -262,16 +277,20 @@ async def _generate_answer(
 
     prompt = (
         "Ты — ассистент, отвечающий на вопросы по документации. "
-        "Используй ТОЛЬКО приведённый контекст. Если ответа нет в контексте — "
-        "скажи «В документации нет информации по этому вопросу».\n"
-        "Отвечай кратко и по существу, 1-3 предложения. "
-        "НЕ используй теги <think>.\n\n"
+        "Используй ТОЛЬКО приведённый контекст.\n\n"
+        "Верни ОДИН JSON-объект с двумя полями:\n"
+        "  - \"answer\": краткий ответ 1-3 предложения на русском\n"
+        "  - \"citations\": массив точных цитат из контекста (слово-в-слово, "
+        "не перефразируй), на которых основан ответ. 1-3 цитаты по 5-20 слов.\n\n"
+        "Если ответа нет в контексте: "
+        "{\"answer\": \"В документации нет информации по этому вопросу\", \"citations\": []}\n\n"
         f"### Контекст:\n{context}\n\n"
         f"### Вопрос: {question}\n\n"
-        "### Ответ:"
+        "### JSON:"
     )
 
-    llm_url = settings.llm_base_url.rstrip("/")
+    # Prefer the dedicated RAG LLM (Qwen3-8B Instruct).
+    llm_url = (settings.rag_llm_base_url or settings.llm_base_url).rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
@@ -279,35 +298,45 @@ async def _generate_answer(
                 json={
                     "model": "default",
                     "messages": [
-                        {"role": "system", "content": "Отвечай кратко и по существу. Не думай вслух."},
+                        {"role": "system", "content": "Ты отвечаешь только валидным JSON. Не думай вслух."},
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 1024,
                     "temperature": 0.1,
+                    "response_format": {"type": "json_object"},
                 },
             )
             resp.raise_for_status()
             data = resp.json()
             msg = data["choices"][0]["message"]
-            # Gemma4 with thinking: answer goes to content, thinking to reasoning_content
-            answer = (msg.get("content") or "").strip()
-            # If content is empty but reasoning_content exists, extract answer from it
-            if not answer and msg.get("reasoning_content"):
-                # Model thought but didn't produce answer — likely ran out of tokens
-                answer = "Модель обрабатывает запрос, попробуйте ещё раз."
-            # Clean up model artifacts
-            if answer:
-                import re
-                # Strip thinking tags
-                answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL)
-                # Strip chat template tags
-                answer = re.sub(r"<\|im_end\|>|<\|im_start\|>|<turn\|>|</s>", "", answer)
-                answer = answer.strip()
-            return answer if answer else None
+            raw = _clean_model_output(msg.get("content") or "")
+
+            if not raw and msg.get("reasoning_content"):
+                return "Модель обрабатывает запрос, попробуйте ещё раз.", []
+
+            # Parse JSON response
+            import json, re
+            answer: str | None = None
+            citations: list[str] = []
+            try:
+                parsed = json.loads(raw)
+                answer = (parsed.get("answer") or "").strip() or None
+                cites = parsed.get("citations") or []
+                if isinstance(cites, list):
+                    citations = [str(c).strip() for c in cites if str(c).strip()]
+            except (json.JSONDecodeError, TypeError):
+                # JSON parse failed — try to extract answer string as fallback
+                match = re.search(r'"answer"\s*:\s*"([^"]+)"', raw)
+                if match:
+                    answer = match.group(1).strip()
+                else:
+                    answer = raw if raw else None
+
+            return answer, citations
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        return f"Не удалось сгенерировать ответ: {exc}"
+        return f"Не удалось сгенерировать ответ: {exc}", []
 
 
 # ---------------------------------------------------------------- query ----
@@ -335,6 +364,13 @@ async def query_knowledge_base(
         )
     query_vec = result.vectors[0]
 
+    # Stage 1: vector search. Over-fetch 3× the requested top_k so the reranker
+    # has enough candidates to pick from. If reranking is disabled we just take
+    # the first top_k in cosine order.
+    from app.services.reranker import RerankerClient
+    reranker = RerankerClient()
+    retrieval_k = payload.top_k * 3 if reranker.enabled else payload.top_k
+
     distance = KnowledgeChunk.embedding.cosine_distance(query_vec).label("distance")
     stmt = (
         select(
@@ -347,11 +383,11 @@ async def query_knowledge_base(
         )
         .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
         .order_by(distance)
-        .limit(payload.top_k)
+        .limit(retrieval_k)
     )
     rows = (await session.execute(stmt)).all()
 
-    matches = [
+    candidates = [
         KnowledgeMatch(
             chunk_id=row.id,
             document_id=row.document_id,
@@ -363,13 +399,28 @@ async def query_knowledge_base(
         for row in rows
     ]
 
-    # Generate LLM answer from retrieved context
+    # Stage 2: rerank the candidates. Returns None if reranker is down —
+    # in that case we keep the vector-search order.
+    rerank_results = await reranker.rerank(
+        payload.query,
+        [c.text for c in candidates],
+        top_n=payload.top_k,
+    )
+    if rerank_results is not None:
+        # Reorder by reranker score; preserve distance for UI display
+        matches = [candidates[r.index] for r in rerank_results]
+        print(f"[RAG] reranked {len(candidates)} → top {len(matches)}", flush=True)
+    else:
+        matches = candidates[: payload.top_k]
+
+    # Generate LLM answer from retrieved context, with citations for highlighting
     print(f"[RAG] query='{payload.query}', matches={len(matches)}", flush=True)
-    answer = await _generate_answer(payload.query, matches)
-    print(f"[RAG] answer={repr(answer)[:200]}", flush=True)
+    answer, citations = await _generate_answer(payload.query, matches)
+    print(f"[RAG] answer={repr(answer)[:150]} citations={len(citations)}", flush=True)
 
     return KnowledgeQueryResponse(
         embedding_model=result.model_name,
         answer=answer,
+        citations=citations,
         matches=matches,
     )

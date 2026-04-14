@@ -31,6 +31,10 @@ class RunCreateV2(BaseModel):
     max_steps: int = Field(default=200, ge=1, le=10000)
     c_puct: float = Field(default=2.0, ge=0.0, le=10.0)
     rollout_depth: int = Field(default=5, ge=0, le=100)
+    # Optional scenarios to run before free exploration (empty = free only).
+    # The agent executes scenarios sequentially, then continues with free
+    # exploration for the remaining max_steps.
+    scenario_ids: list[UUID] = Field(default_factory=list)
 
 
 class RunRead(BaseModel):

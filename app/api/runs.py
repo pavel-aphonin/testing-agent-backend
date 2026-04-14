@@ -124,6 +124,8 @@ async def create_run_v2(
         device_type=device_config.device_identifier,
         os_version=device_config.os_identifier,
         app_file_path=meta["app_relative_path"],
+        # Empty list = free exploration only. Non-empty = run scenarios first.
+        scenario_ids=[str(sid) for sid in payload.scenario_ids] or None,
     )
     session.add(run)
     await session.commit()
@@ -209,12 +211,60 @@ async def get_screen_screenshot(
     return FileResponse(file_path, media_type="image/png")
 
 
+@router.post("/{run_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_run(
+    run_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Mark a running run as CANCELLED.
+
+    The worker sees the terminal status on its next heartbeat / event post
+    (via the 409 response from /internal/runs/{id}/event) and stops its loop.
+    Idempotent — calling on an already-terminal run is a no-op.
+    """
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _is_admin(user) and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+    if user.role == UserRole.VIEWER.value:
+        raise HTTPException(status_code=403, detail="Viewers cannot cancel runs")
+
+    terminal = {
+        RunStatus.COMPLETED.value,
+        RunStatus.FAILED.value,
+        RunStatus.CANCELLED.value,
+    }
+    if run.status in terminal:
+        return {"status": run.status, "message": "already terminal"}
+
+    from datetime import datetime, timezone
+    run.status = RunStatus.CANCELLED.value
+    run.finished_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    # Broadcast so subscribed UIs see the status flip immediately.
+    from app.redis_bus import publish_run_event
+    await publish_run_event(
+        str(run.id),
+        {
+            "type": "status_change",
+            "new_status": RunStatus.CANCELLED.value,
+            "timestamp": run.finished_at.isoformat(),
+        },
+    )
+    return {"status": run.status}
+
+
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_run(
     run_id: UUID,
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> None:
+    """Delete a run. If it's still running, cancel it first so the worker stops."""
     result = await session.execute(select(Run).where(Run.id == run_id))
     run = result.scalar_one_or_none()
     if run is None:
@@ -223,5 +273,27 @@ async def delete_run(
         raise HTTPException(status_code=403, detail="Not your run")
     if user.role == UserRole.VIEWER.value:
         raise HTTPException(status_code=403, detail="Viewers cannot delete runs")
+
+    # If still active, flip to CANCELLED so the worker stops on its next event.
+    # We don't wait for the worker to acknowledge — the DELETE still proceeds.
+    active = {RunStatus.PENDING.value, RunStatus.RUNNING.value}
+    if run.status in active:
+        from datetime import datetime, timezone
+        from app.redis_bus import publish_run_event
+        run.status = RunStatus.CANCELLED.value
+        run.finished_at = datetime.now(timezone.utc)
+        await session.commit()
+        await publish_run_event(
+            str(run.id),
+            {
+                "type": "status_change",
+                "new_status": RunStatus.CANCELLED.value,
+                "timestamp": run.finished_at.isoformat(),
+            },
+        )
+        # Refetch to continue deletion
+        result = await session.execute(select(Run).where(Run.id == run_id))
+        run = result.scalar_one()
+
     await session.delete(run)
     await session.commit()

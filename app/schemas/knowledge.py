@@ -61,4 +61,9 @@ class KnowledgeMatch(BaseModel):
 class KnowledgeQueryResponse(BaseModel):
     embedding_model: str
     answer: str | None = None  # LLM-generated answer based on retrieved chunks
+    # Exact text fragments from the source chunks that back up the answer.
+    # The UI highlights these in yellow inside the source chunks. Empty list
+    # means the LLM didn't return citations (e.g. reranker-only mode or the
+    # model ignored the instruction).
+    citations: list[str] = []
     matches: list[KnowledgeMatch]
