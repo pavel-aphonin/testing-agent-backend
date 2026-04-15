@@ -56,6 +56,14 @@ async def _build_snapshot(session: AsyncSession, run: Run) -> dict:
             "finished_at": run.finished_at.isoformat() if run.finished_at else None,
             "error_message": run.error_message,
             "stats": run.stats_json,
+            # V2-flow fields. Frontend uses these to render the Synthetic/Real
+            # badge — if device_type/app_file_path are set, the worker provisioned
+            # a real simulator or emulator for this run. Otherwise the user ran
+            # against a pre-existing (synthetic / legacy) device id.
+            "device_type": run.device_type,
+            "os_version": run.os_version,
+            "app_file_path": run.app_file_path,
+            "platform": run.platform,
         },
         "screens": [
             {
