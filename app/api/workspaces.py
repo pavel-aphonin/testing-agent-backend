@@ -10,13 +10,19 @@ Access rules:
 
 from __future__ import annotations
 
+import os
+import uuid as _uuid
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from app.config import settings
 
 from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
@@ -135,6 +141,73 @@ async def create_workspace(
     await session.commit()
     await session.refresh(ws)
     return ws
+
+
+# ── Logo upload ──────────────────────────────────────────────────────────────
+
+
+def _logos_dir() -> Path:
+    """Where workspace logos live on disk. Inside the shared app uploads
+    volume so the file is visible to both backend container and frontend
+    (which serves it via /api/workspaces/{id}/logo)."""
+    base = Path(settings.app_uploads_dir) / "workspace-logos"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+@router.post("/{ws_id}/logo", response_model=WorkspaceRead)
+async def upload_logo(
+    ws_id: UUID,
+    file: UploadFile,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> Workspace:
+    ws = await _get_workspace(ws_id, session)
+    if not _has_perm(user, "users.view"):
+        await _require_ws_role(ws_id, user, session, WsRole.MODERATOR)
+
+    if not file.filename:
+        raise HTTPException(400, "Имя файла не указано")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
+        raise HTTPException(400, "Поддерживаются только PNG/JPG/GIF/WebP/SVG")
+
+    content = await file.read()
+    if len(content) > 2_000_000:  # 2 MB
+        raise HTTPException(413, "Файл слишком большой (макс. 2 МБ)")
+
+    fname = f"{ws_id}_{_uuid.uuid4().hex[:8]}{ext}"
+    fpath = _logos_dir() / fname
+    fpath.write_bytes(content)
+
+    # Delete old logo file if present
+    if ws.logo_path:
+        old = Path(settings.app_uploads_dir) / ws.logo_path
+        if old.exists() and old.is_file():
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    ws.logo_path = f"workspace-logos/{fname}"
+    await session.commit()
+    await session.refresh(ws)
+    return ws
+
+
+@router.get("/{ws_id}/logo")
+async def get_logo(
+    ws_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+):
+    """Public endpoint to serve workspace logo (no auth — used in <img>)."""
+    ws = await session.get(Workspace, ws_id)
+    if ws is None or not ws.logo_path:
+        raise HTTPException(404, "No logo")
+    fpath = Path(settings.app_uploads_dir) / ws.logo_path
+    if not fpath.exists():
+        raise HTTPException(404, "Logo file missing")
+    return FileResponse(fpath)
 
 
 @router.patch("/{ws_id}", response_model=WorkspaceRead)

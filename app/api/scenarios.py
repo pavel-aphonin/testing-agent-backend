@@ -27,13 +27,14 @@ router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 async def list_scenarios(
     _user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    workspace_id: UUID | None = None,
 ) -> list[Scenario]:
-    """List all active scenarios (any authenticated user)."""
-    result = await session.execute(
-        select(Scenario)
-        .where(Scenario.is_active.is_(True))
-        .order_by(Scenario.created_at.desc())
-    )
+    """List active scenarios. Filtered by workspace if provided."""
+    q = select(Scenario).where(Scenario.is_active.is_(True))
+    if workspace_id is not None:
+        q = q.where(Scenario.workspace_id == workspace_id)
+    q = q.order_by(Scenario.created_at.desc())
+    result = await session.execute(q)
     return list(result.scalars().all())
 
 
@@ -53,6 +54,7 @@ async def create_scenario(
         description=payload.description,
         steps_json=payload.steps_json,
         created_by_user_id=user.id,
+        workspace_id=payload.workspace_id,
     )
     session.add(scenario)
     await session.commit()

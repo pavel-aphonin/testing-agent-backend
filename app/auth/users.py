@@ -105,7 +105,8 @@ def require_permission(*perms: str):
 # ── Legacy aliases ───────────────────────────────────────────────────────────
 # Keep these so existing router imports don't break during the migration
 # period. They'll be removed once all endpoints switch to require_permission.
+# Mapped to permissions that ONLY admin actually has (users.view).
 
 require_viewer = require_permission("runs.view")
 require_tester = require_permission("runs.view", "runs.create")
-require_admin = require_permission("users.manage")
+require_admin = require_permission("users.view")

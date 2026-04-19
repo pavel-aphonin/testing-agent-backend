@@ -27,6 +27,14 @@ class Scenario(Base):
         nullable=False,
     )
 
+    # Workspace this scenario belongs to. Nullable for legacy data.
+    workspace_id = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(

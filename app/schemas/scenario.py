@@ -17,6 +17,7 @@ class ScenarioRead(BaseModel):
     steps_json: dict
     is_active: bool
     created_by_user_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
     created_at: datetime
 
 
@@ -24,6 +25,7 @@ class ScenarioCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = None
     steps_json: dict
+    workspace_id: uuid.UUID | None = None
 
 
 class ScenarioUpdate(BaseModel):

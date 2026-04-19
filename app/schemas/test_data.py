@@ -17,6 +17,7 @@ class TestDataRead(BaseModel):
     category: str
     description: str | None
     created_by_user_id: uuid.UUID
+    workspace_id: uuid.UUID | None = None
     created_at: datetime
 
 
@@ -25,6 +26,7 @@ class TestDataCreate(BaseModel):
     value: str = Field(min_length=1)
     category: str = Field(default="general", max_length=50)
     description: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class TestDataUpdate(BaseModel):

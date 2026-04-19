@@ -27,11 +27,14 @@ router = APIRouter(prefix="/api/test-data", tags=["test-data"])
 async def list_test_data(
     _user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    workspace_id: UUID | None = None,
 ) -> list[TestData]:
-    """List all test data entries (any authenticated user)."""
-    result = await session.execute(
-        select(TestData).order_by(TestData.category, TestData.key)
-    )
+    """List test data entries. Filtered by workspace if provided."""
+    q = select(TestData)
+    if workspace_id is not None:
+        q = q.where(TestData.workspace_id == workspace_id)
+    q = q.order_by(TestData.category, TestData.key)
+    result = await session.execute(q)
     return list(result.scalars().all())
 
 
@@ -52,6 +55,7 @@ async def create_test_data(
         category=payload.category,
         description=payload.description,
         created_by_user_id=user.id,
+        workspace_id=payload.workspace_id,
     )
     session.add(entry)
     await session.commit()

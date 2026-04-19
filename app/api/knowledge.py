@@ -45,10 +45,13 @@ router = APIRouter(prefix="/api/admin/knowledge", tags=["knowledge"])
 async def list_documents(
     _admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    workspace_id: UUID | None = None,
 ) -> list[KnowledgeDocument]:
-    result = await session.execute(
-        select(KnowledgeDocument).order_by(KnowledgeDocument.uploaded_at.desc())
-    )
+    q = select(KnowledgeDocument)
+    if workspace_id is not None:
+        q = q.where(KnowledgeDocument.workspace_id == workspace_id)
+    q = q.order_by(KnowledgeDocument.uploaded_at.desc())
+    result = await session.execute(q)
     return list(result.scalars().all())
 
 

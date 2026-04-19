@@ -29,6 +29,14 @@ class TestData(Base):
         index=True,
     )
 
+    # Workspace this test data belongs to. Nullable for legacy data.
+    workspace_id = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
