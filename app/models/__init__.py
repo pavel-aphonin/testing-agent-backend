@@ -2,6 +2,11 @@
 
 from app.models.agent_settings import AgentSettings
 from app.models.attribute import Attribute, AttributeValue
+from app.models.custom_dictionary import (
+    CustomDictionary,
+    CustomDictionaryItem,
+    CustomDictionaryPermission,
+)
 from app.models.defect import DefectKind, DefectModel, DefectPriority
 from app.models.device_config import DeviceConfig
 from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocument
@@ -18,6 +23,9 @@ __all__ = [
     "AgentSettings",
     "Attribute",
     "AttributeValue",
+    "CustomDictionary",
+    "CustomDictionaryItem",
+    "CustomDictionaryPermission",
     "DefectKind",
     "DefectModel",
     "DefectPriority",

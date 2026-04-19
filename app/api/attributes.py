@@ -45,6 +45,24 @@ async def _validate_value(attr: Attribute, val: object, session: AsyncSession) -
     if dt == "boolean":
         return isinstance(val, bool)
     if dt == "enum":
+        # Source-dictionary mode: value must be a UUID of an item in the
+        # referenced dictionary.
+        if attr.source_dictionary_id is not None:
+            from app.models.custom_dictionary import CustomDictionaryItem
+            if not isinstance(val, str):
+                return False
+            try:
+                item_uuid = _UUID(val)
+            except (ValueError, TypeError):
+                return False
+            res = await session.execute(
+                select(CustomDictionaryItem).where(
+                    CustomDictionaryItem.id == item_uuid,
+                    CustomDictionaryItem.dictionary_id == attr.source_dictionary_id,
+                )
+            )
+            return res.scalar_one_or_none() is not None
+        # Static enum_values mode
         return isinstance(val, str) and val in (attr.enum_values or [])
     if dt == "date":
         if not isinstance(val, str):
@@ -118,6 +136,7 @@ async def create_attribute(
         parent_id=payload.parent_id,
         is_group=payload.is_group,
         is_required=payload.is_required,
+        source_dictionary_id=payload.source_dictionary_id,
         is_system=False,
     )
     session.add(attr)
@@ -147,6 +166,8 @@ async def update_attribute(
         attr.default_value = payload.default_value
     if payload.is_required is not None:
         attr.is_required = payload.is_required
+    if payload.source_dictionary_id is not None:
+        attr.source_dictionary_id = payload.source_dictionary_id
     if payload.parent_id is not None:
         if payload.parent_id == attr.id:
             raise HTTPException(400, "Cannot be own parent")

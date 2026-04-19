@@ -23,6 +23,7 @@ class AttributeRead(BaseModel):
     applies_to: str
     is_system: bool
     is_required: bool = False
+    source_dictionary_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
     is_group: bool = False
     created_at: datetime
@@ -41,6 +42,9 @@ class AttributeCreate(BaseModel):
     scope: str = Field(default="workspace", pattern=r"^(workspace|user)$")
     applies_to: str = Field(default="workspace")
     is_required: bool = False
+    # When set, enum values come from this custom dictionary's items
+    # (per-workspace) instead of the static enum_values list.
+    source_dictionary_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
     is_group: bool = False
 
@@ -51,6 +55,7 @@ class AttributeUpdate(BaseModel):
     enum_values: list | None = None
     default_value: Any | None = None
     is_required: bool | None = None
+    source_dictionary_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
 
 

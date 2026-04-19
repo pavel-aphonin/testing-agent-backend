@@ -62,6 +62,16 @@ class Attribute(Base):
     # with an asterisk.
     is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # When data_type=enum and this is set, the allowed values come from
+    # the named custom dictionary (per-workspace). The enum_values
+    # column is then ignored. Stored value = item id (UUID string).
+    source_dictionary_id = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("custom_dictionaries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Tree structure — same as roles/workspaces
     parent_id = mapped_column(
         PG_UUID(as_uuid=True),
