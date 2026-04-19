@@ -41,6 +41,9 @@ class RunCreateV2(BaseModel):
     scenario_ids: list[UUID] = Field(default_factory=list)
     # Property-based testing: probe form validation with edge-case values.
     pbt_enabled: bool = False
+    # Workspace this run belongs to. The frontend sends the active
+    # workspace from the WorkspaceSwitcher.
+    workspace_id: UUID | None = None
 
 
 class RunRead(BaseModel):

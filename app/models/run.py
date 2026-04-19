@@ -99,6 +99,15 @@ class Run(Base):
     # Path on disk for the explorer output dir (graph.json, screenshots, etc.)
     output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Workspace this run belongs to. Nullable so legacy runs (from before
+    # workspaces existed) keep working — new runs always have one.
+    workspace_id = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     # Optional scenarios to follow before free exploration. Stored as a JSON
     # array of scenario UUIDs (as strings). Empty list = pure free exploration.
     # When set, the worker expands each scenario into its steps_json and

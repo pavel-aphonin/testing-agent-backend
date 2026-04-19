@@ -36,13 +36,33 @@ def _has_perm(user: User, perm: str) -> bool:
 async def list_runs(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    workspace_id: UUID | None = None,
 ) -> list[Run]:
-    if _has_perm(user, "users.view"):
-        result = await session.execute(select(Run).order_by(Run.created_at.desc()))
-    else:
-        result = await session.execute(
-            select(Run).where(Run.user_id == user.id).order_by(Run.created_at.desc())
-        )
+    """List runs.
+
+    If `workspace_id` query param is set, returns only runs in that
+    workspace (and the caller must be a member). Otherwise returns
+    runs the caller created (admins see all).
+    """
+    q = select(Run).order_by(Run.created_at.desc())
+
+    if workspace_id is not None:
+        # Verify membership unless admin
+        if not _has_perm(user, "users.view"):
+            from app.models.workspace import WorkspaceMember
+            mem_result = await session.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.user_id == user.id,
+                )
+            )
+            if mem_result.scalar_one_or_none() is None:
+                raise HTTPException(403, "Not a member of this workspace")
+        q = q.where(Run.workspace_id == workspace_id)
+    elif not _has_perm(user, "users.view"):
+        q = q.where(Run.user_id == user.id)
+
+    result = await session.execute(q)
     return list(result.scalars().all())
 
 
@@ -128,6 +148,7 @@ async def create_run_v2(
         # Empty list = free exploration only. Non-empty = run scenarios first.
         scenario_ids=[str(sid) for sid in payload.scenario_ids] or None,
         pbt_enabled=payload.pbt_enabled,
+        workspace_id=payload.workspace_id,
     )
     session.add(run)
     await session.commit()

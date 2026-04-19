@@ -29,6 +29,7 @@ from app.api import scenarios as scenarios_api
 from app.api import test_data as test_data_api
 from app.api import worker_status as worker_status_api
 from app.api import workspaces as workspaces_api
+from app.api import notifications as notifications_api
 from app.auth.users import auth_backend, fastapi_users
 from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
@@ -41,7 +42,9 @@ from app.models import (  # noqa: F401  registers all tables on Base.metadata
     LLMModel,
     Role,
     Run,
+    Notification,
     Workspace,
+    WorkspaceInvitation,
     WorkspaceMember,
     Scenario,
     Screen,
@@ -149,5 +152,7 @@ app.include_router(assistant_api.router)
 app.include_router(roles_api.router)
 app.include_router(workspaces_api.router)
 app.include_router(workspaces_api.admin_router)
+app.include_router(notifications_api.router)
+app.include_router(notifications_api.inv_router)
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)

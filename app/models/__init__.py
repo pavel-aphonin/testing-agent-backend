@@ -5,6 +5,7 @@ from app.models.defect import DefectKind, DefectModel, DefectPriority
 from app.models.device_config import DeviceConfig
 from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocument
 from app.models.llm_model import LLMModel
+from app.models.notification import Notification, WorkspaceInvitation
 from app.models.role import Role
 from app.models.run import Edge, Run, RunMode, RunStatus, Screen
 from app.models.scenario import Scenario
@@ -23,6 +24,7 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeDocument",
     "LLMModel",
+    "Notification",
     "Role",
     "Run",
     "RunMode",
@@ -32,6 +34,7 @@ __all__ = [
     "TestData",
     "User",
     "Workspace",
+    "WorkspaceInvitation",
     "WorkspaceMember",
     "WsRole",
 ]
