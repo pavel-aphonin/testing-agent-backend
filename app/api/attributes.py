@@ -27,6 +27,50 @@ attr_router = APIRouter(prefix="/api/dictionaries/attributes", tags=["attributes
 val_router = APIRouter(prefix="/api/attribute-values", tags=["attribute-values"])
 
 
+async def _validate_value(attr: Attribute, val: object, session: AsyncSession) -> bool:
+    """Type-check a value against an attribute's data_type.
+
+    Returns True if value is acceptable. For ``member``, also verifies the
+    user exists in the database.
+    """
+    import re
+    from datetime import datetime as _dt
+    from uuid import UUID as _UUID
+
+    dt = attr.data_type
+    if dt == "string":
+        return isinstance(val, str)
+    if dt == "number":
+        return isinstance(val, (int, float)) and not isinstance(val, bool)
+    if dt == "boolean":
+        return isinstance(val, bool)
+    if dt == "enum":
+        return isinstance(val, str) and val in (attr.enum_values or [])
+    if dt == "date":
+        if not isinstance(val, str):
+            return False
+        try:
+            _dt.fromisoformat(val.replace("Z", "+00:00"))
+            return True
+        except ValueError:
+            return False
+    if dt == "link":
+        if not isinstance(val, str):
+            return False
+        return bool(re.match(r"^https?://[^\s]+$", val))
+    if dt == "member":
+        if not isinstance(val, str):
+            return False
+        try:
+            user_uuid = _UUID(val)
+        except (ValueError, TypeError):
+            return False
+        # Verify user exists
+        u = await session.get(User, user_uuid)
+        return u is not None
+    return False
+
+
 # ── Definitions ──────────────────────────────────────────────────────────────
 
 @attr_router.get("", response_model=list[AttributeRead])
@@ -73,6 +117,7 @@ async def create_attribute(
         applies_to=payload.applies_to,
         parent_id=payload.parent_id,
         is_group=payload.is_group,
+        is_required=payload.is_required,
         is_system=False,
     )
     session.add(attr)
@@ -100,6 +145,8 @@ async def update_attribute(
         attr.enum_values = payload.enum_values
     if payload.default_value is not None:
         attr.default_value = payload.default_value
+    if payload.is_required is not None:
+        attr.is_required = payload.is_required
     if payload.parent_id is not None:
         if payload.parent_id == attr.id:
             raise HTTPException(400, "Cannot be own parent")
@@ -169,21 +216,30 @@ async def upsert_value(
     if attr is None:
         raise HTTPException(404, "Attribute not found")
 
-    # Validate value matches data_type
+    # Required check
     val = payload.value
-    if val is not None:
-        ok = (
-            (attr.data_type == "string" and isinstance(val, str))
-            or (attr.data_type == "number" and isinstance(val, (int, float)))
-            or (attr.data_type == "boolean" and isinstance(val, bool))
-            or (attr.data_type == "enum" and isinstance(val, str)
-                and val in (attr.enum_values or []))
+    if attr.is_required and (val is None or val == "" or val == []):
+        raise HTTPException(
+            422,
+            f"Атрибут «{attr.name}» обязателен для заполнения",
         )
+
+    # Validate value matches data_type
+    if val is not None:
+        ok = await _validate_value(attr, val, session)
         if not ok:
+            hint = ""
+            if attr.data_type == "enum":
+                hint = f" (одно из: {attr.enum_values})"
+            elif attr.data_type == "date":
+                hint = " (ISO-8601 строка: YYYY-MM-DD или с временем)"
+            elif attr.data_type == "link":
+                hint = " (URL начинающийся с http:// или https://)"
+            elif attr.data_type == "member":
+                hint = " (UUID существующего пользователя)"
             raise HTTPException(
                 422,
-                f"Value type mismatch: expected {attr.data_type} "
-                f"({'one of ' + str(attr.enum_values) if attr.data_type == 'enum' else ''})",
+                f"Несоответствие типа: ожидается {attr.data_type}{hint}",
             )
 
     # Upsert

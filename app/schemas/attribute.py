@@ -22,6 +22,7 @@ class AttributeRead(BaseModel):
     scope: str
     applies_to: str
     is_system: bool
+    is_required: bool = False
     parent_id: uuid.UUID | None = None
     is_group: bool = False
     created_at: datetime
@@ -32,11 +33,14 @@ class AttributeCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_]*$")
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
-    data_type: str = Field(..., pattern=r"^(string|number|boolean|enum)$")
+    data_type: str = Field(
+        ..., pattern=r"^(string|number|boolean|enum|date|link|member)$"
+    )
     enum_values: list | None = None
     default_value: Any | None = None
     scope: str = Field(default="workspace", pattern=r"^(workspace|user)$")
     applies_to: str = Field(default="workspace")
+    is_required: bool = False
     parent_id: uuid.UUID | None = None
     is_group: bool = False
 
@@ -46,6 +50,7 @@ class AttributeUpdate(BaseModel):
     description: str | None = None
     enum_values: list | None = None
     default_value: Any | None = None
+    is_required: bool | None = None
     parent_id: uuid.UUID | None = None
 
 

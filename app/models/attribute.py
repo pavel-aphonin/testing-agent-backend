@@ -38,7 +38,10 @@ class Attribute(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # "string" | "number" | "boolean" | "enum"
+    # "string" | "number" | "boolean" | "enum" | "date" | "link" | "member"
+    # date   = ISO-8601 date or datetime string
+    # link   = URL string (validated loosely)
+    # member = user UUID (referencing users.id)
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
     # For data_type="enum": list of allowed string values.
     enum_values: Mapped[list | None] = mapped_column(JSONB, nullable=True)
@@ -54,6 +57,10 @@ class Attribute(Base):
     applies_to: Mapped[str] = mapped_column(String(50), default="workspace", nullable=False)
 
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When true, the attribute MUST have a non-null value when bound to
+    # an entity. Enforced at upsert time on the backend, hinted in UI
+    # with an asterisk.
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Tree structure — same as roles/workspaces
     parent_id = mapped_column(
