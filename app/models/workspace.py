@@ -51,6 +51,16 @@ class Workspace(Base):
     is_archived: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+
+    # Tree structure: optional parent group. Unlimited nesting depth.
+    parent_id = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # When true this is just a folder; users can't be members of a group.
+    is_group: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

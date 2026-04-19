@@ -17,6 +17,8 @@ class RoleRead(BaseModel):
     description: str | None
     is_system: bool
     permissions: list[str]
+    parent_id: uuid.UUID | None = None
+    is_group: bool = False
     created_at: datetime
     updated_at: datetime | None
 
@@ -26,9 +28,12 @@ class RoleCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_]*$")
     description: str | None = None
     permissions: list[str] = Field(default_factory=list)
+    parent_id: uuid.UUID | None = None
+    is_group: bool = False
 
 
 class RoleUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     permissions: list[str] | None = None
+    parent_id: uuid.UUID | None = None

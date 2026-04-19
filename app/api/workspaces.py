@@ -90,7 +90,11 @@ async def my_workspaces(
     result = await session.execute(
         select(Workspace)
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
-        .where(WorkspaceMember.user_id == user.id, Workspace.is_archived == False)  # noqa: E712
+        .where(
+            WorkspaceMember.user_id == user.id,
+            Workspace.is_archived == False,  # noqa: E712
+            Workspace.is_group == False,  # noqa: E712
+        )
         .order_by(Workspace.name)
     )
     return list(result.scalars().all())
@@ -122,22 +126,30 @@ async def create_workspace(
     if exists.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Workspace code already exists")
 
+    if payload.parent_id:
+        parent = await session.get(Workspace, payload.parent_id)
+        if parent is None:
+            raise HTTPException(404, "Parent workspace not found")
+
     ws = Workspace(
         code=payload.code,
         name=payload.name,
         description=payload.description,
         created_by_user_id=user.id,
+        parent_id=payload.parent_id,
+        is_group=payload.is_group,
     )
     session.add(ws)
     await session.flush()
 
-    # Creator becomes owner
-    member = WorkspaceMember(
-        workspace_id=ws.id,
-        user_id=user.id,
-        role=WsRole.OWNER.value,
-    )
-    session.add(member)
+    # Creator becomes owner — but only for actual workspaces, not groups
+    if not payload.is_group:
+        member = WorkspaceMember(
+            workspace_id=ws.id,
+            user_id=user.id,
+            role=WsRole.OWNER.value,
+        )
+        session.add(member)
     await session.commit()
     await session.refresh(ws)
     return ws
@@ -225,6 +237,21 @@ async def update_workspace(
         ws.name = payload.name
     if payload.description is not None:
         ws.description = payload.description
+
+    if payload.parent_id is not None:
+        if payload.parent_id == ws.id:
+            raise HTTPException(400, "Workspace cannot be its own parent")
+        cursor_id = payload.parent_id
+        depth = 0
+        while cursor_id is not None and depth < 100:
+            if cursor_id == ws.id:
+                raise HTTPException(400, "Cycle detected")
+            cursor = await session.get(Workspace, cursor_id)
+            if cursor is None:
+                break
+            cursor_id = cursor.parent_id
+            depth += 1
+        ws.parent_id = payload.parent_id
 
     await session.commit()
     await session.refresh(ws)

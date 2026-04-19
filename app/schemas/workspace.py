@@ -17,6 +17,8 @@ class WorkspaceRead(BaseModel):
     description: str | None
     logo_path: str | None
     is_archived: bool
+    parent_id: uuid.UUID | None = None
+    is_group: bool = False
     created_by_user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime | None
@@ -26,11 +28,14 @@ class WorkspaceCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_-]*$")
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
+    parent_id: uuid.UUID | None = None
+    is_group: bool = False
 
 
 class WorkspaceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
+    parent_id: uuid.UUID | None = None
 
 
 class WorkspaceMemberRead(BaseModel):

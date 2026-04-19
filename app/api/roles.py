@@ -63,12 +63,20 @@ async def create_role(
     if exists.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Role with this name or code already exists")
 
+    # Validate parent exists if specified
+    if payload.parent_id:
+        parent = await session.get(Role, payload.parent_id)
+        if parent is None:
+            raise HTTPException(404, "Parent role not found")
+
     role = Role(
         name=payload.name,
         code=payload.code,
         description=payload.description,
         is_system=False,
         permissions=sorted(payload.permissions),
+        parent_id=payload.parent_id,
+        is_group=payload.is_group,
     )
     session.add(role)
     await session.commit()
@@ -103,6 +111,22 @@ async def update_role(
                 detail=f"Unknown permission codes: {sorted(invalid)}",
             )
         role.permissions = sorted(payload.permissions)
+
+    if payload.parent_id is not None:
+        # Cycle check: walk up the new parent chain, must not hit `role.id`
+        if payload.parent_id == role.id:
+            raise HTTPException(400, "Role cannot be its own parent")
+        cursor_id = payload.parent_id
+        depth = 0
+        while cursor_id is not None and depth < 100:
+            if cursor_id == role.id:
+                raise HTTPException(400, "Cycle detected: cannot make node a descendant of itself")
+            cursor = await session.get(Role, cursor_id)
+            if cursor is None:
+                break
+            cursor_id = cursor.parent_id
+            depth += 1
+        role.parent_id = payload.parent_id
 
     await session.commit()
     await session.refresh(role)
