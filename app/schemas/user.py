@@ -4,16 +4,19 @@ import uuid
 
 from fastapi_users import schemas
 
-from app.models.user import UserRole
-
 
 class UserRead(schemas.BaseUser[uuid.UUID]):
     role: str
     must_change_password: bool
+    # New RBAC fields — populated from the Role relationship.
+    role_id: uuid.UUID | None = None
+    role_name: str = ""
+    role_code: str = ""
+    permissions: list[str] = []
 
 
 class UserCreate(schemas.BaseUserCreate):
-    role: str = UserRole.TESTER.value
+    role: str = "tester"
     must_change_password: bool = True
 
 

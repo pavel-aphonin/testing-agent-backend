@@ -1,4 +1,4 @@
-"""fastapi-users wiring: JWT backend, user manager, role-based dependencies."""
+"""fastapi-users wiring: JWT backend, user manager, permission-based guards."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 
 from app.config import settings
 from app.db import async_session_maker
-from app.models.user import User, UserRole
+from app.models.user import User
 
 # --- Transport + strategy ----------------------------------------------------
 
@@ -71,31 +71,41 @@ current_active_user = fastapi_users.current_user(active=True)
 current_superuser = fastapi_users.current_user(active=True, superuser=True)
 
 
-# --- Role guards -------------------------------------------------------------
-
-_ROLE_ORDER = {
-    UserRole.VIEWER.value: 0,
-    UserRole.TESTER.value: 1,
-    UserRole.ADMIN.value: 2,
-}
+# --- Permission guards -------------------------------------------------------
+# New system: check whether the user's Role contains a specific permission
+# code (e.g. "runs.create"). Replaces the old require_viewer / require_tester /
+# require_admin hierarchy.
 
 
-def require_role(minimum: UserRole):
-    """Dependency factory: require at least `minimum` role."""
+def require_permission(*perms: str):
+    """Dependency factory: require ALL of the listed permissions.
+
+    Usage::
+
+        @router.post("/api/runs")
+        async def create_run(
+            user: Annotated[User, Depends(require_permission("runs.create"))],
+        ):
+            ...
+    """
 
     async def _guard(user: Annotated[User, Depends(current_active_user)]) -> User:
-        user_level = _ROLE_ORDER.get(user.role, -1)
-        required_level = _ROLE_ORDER[minimum.value]
-        if user_level < required_level:
+        user_perms = set(user.permissions)
+        missing = set(perms) - user_perms
+        if missing:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires {minimum.value} role or higher",
+                detail=f"Missing permissions: {sorted(missing)}",
             )
         return user
 
     return _guard
 
 
-require_viewer = require_role(UserRole.VIEWER)
-require_tester = require_role(UserRole.TESTER)
-require_admin = require_role(UserRole.ADMIN)
+# ── Legacy aliases ───────────────────────────────────────────────────────────
+# Keep these so existing router imports don't break during the migration
+# period. They'll be removed once all endpoints switch to require_permission.
+
+require_viewer = require_permission("runs.view")
+require_tester = require_permission("runs.view", "runs.create")
+require_admin = require_permission("users.manage")

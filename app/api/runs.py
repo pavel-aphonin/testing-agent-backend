@@ -17,19 +17,19 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.users import current_active_user, require_tester
+from app.auth.users import current_active_user, require_permission
 from app.config import settings
 from app.db import get_async_session
 from app.models.device_config import DeviceConfig
 from app.models.run import Edge, Run, RunStatus, Screen
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.run import RunCreate, RunCreateV2, RunRead, RunResultRead
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
-def _is_admin(user: User) -> bool:
-    return user.role == UserRole.ADMIN.value
+def _has_perm(user: User, perm: str) -> bool:
+    return perm in user.permissions
 
 
 @router.get("", response_model=list[RunRead])
@@ -37,7 +37,7 @@ async def list_runs(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> list[Run]:
-    if _is_admin(user):
+    if _has_perm(user, "users.view"):
         result = await session.execute(select(Run).order_by(Run.created_at.desc()))
     else:
         result = await session.execute(
@@ -50,7 +50,7 @@ async def list_runs(
     "",
     response_model=RunRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("runs.create"))],
 )
 async def create_run(
     payload: RunCreate,
@@ -83,7 +83,7 @@ async def create_run(
     "/v2",
     response_model=RunRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("runs.create"))],
 )
 async def create_run_v2(
     payload: RunCreateV2,
@@ -145,7 +145,7 @@ async def get_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
     return run
 
@@ -165,7 +165,7 @@ async def get_run_results(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
 
     screens_q = await session.execute(
@@ -196,7 +196,7 @@ async def get_screen_screenshot(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
 
     screen_result = await session.execute(
@@ -229,10 +229,10 @@ async def cancel_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
-    if user.role == UserRole.VIEWER.value:
-        raise HTTPException(status_code=403, detail="Viewers cannot cancel runs")
+    if not _has_perm(user, "runs.cancel"):
+        raise HTTPException(status_code=403, detail="Missing runs.cancel permission")
 
     terminal = {
         RunStatus.COMPLETED.value,
@@ -271,10 +271,10 @@ async def delete_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
-    if user.role == UserRole.VIEWER.value:
-        raise HTTPException(status_code=403, detail="Viewers cannot delete runs")
+    if not _has_perm(user, "runs.delete"):
+        raise HTTPException(status_code=403, detail="Missing runs.delete permission")
 
     # If still active, flip to CANCELLED so the worker stops on its next event.
     # We don't wait for the worker to acknowledge — the DELETE still proceeds.

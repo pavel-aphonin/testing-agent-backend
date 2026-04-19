@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.users import current_active_user
 from app.db import get_async_session
 from app.models.run import Run
-from app.models.user import User, UserRole
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ async def _check_run_visible(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if user.role != UserRole.ADMIN.value and run.user_id != user.id:
+    if "users.view" not in (user.permissions or []) and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your run")
     return run
 

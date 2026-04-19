@@ -16,7 +16,8 @@ from app.config import settings
 from app.db import async_session_maker
 from app.llm_swap import regenerate_swap_config
 from app.models.llm_model import LLMModel
-from app.models.user import User, UserRole
+from app.models.role import Role
+from app.models.user import User
 from app.schemas.user import UserCreate
 
 
@@ -30,10 +31,9 @@ INITIAL_MODELS = [
             "vision input, tool use, audio, 140+ languages. The fast "
             "classifier in Hybrid mode — sets PUCT priors over UI elements."
         ),
-        # unsloth/gemma-4-E4B-it-GGUF — capital 'E4B' matters on Linux.
         "gguf_path": "/var/lib/llm-models/gemma-4-E4B-it-Q4_K_M.gguf",
         "mmproj_path": "/var/lib/llm-models/gemma-4-E4B-it-mmproj-F16.gguf",
-        "size_bytes": 5_100_000_000,  # ~4.98 GB
+        "size_bytes": 5_100_000_000,
         "context_length": 131_072,
         "quantization": "Q4_K_M",
         "supports_vision": True,
@@ -51,10 +51,9 @@ INITIAL_MODELS = [
             "vision, tool use, reasoning. The smart actor in AI mode and "
             "the analyzer for Phase 2 graph review."
         ),
-        # unsloth/Qwen3.5-35B-A3B-GGUF — 'UD-' is the Unsloth Dynamic prefix.
         "gguf_path": "/var/lib/llm-models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf",
         "mmproj_path": "/var/lib/llm-models/Qwen3.5-35B-A3B-mmproj-F16.gguf",
-        "size_bytes": 22_200_000_000,  # ~22.2 GB
+        "size_bytes": 22_200_000_000,
         "context_length": 262_144,
         "quantization": "UD-Q4_K_XL",
         "supports_vision": True,
@@ -66,7 +65,10 @@ INITIAL_MODELS = [
 
 
 async def seed_initial_admin() -> None:
-    """Create the first admin if the users table is empty."""
+    """Create the first admin if the users table is empty.
+
+    After creating the user, link them to the system 'admin' role.
+    """
     async with async_session_maker() as session:
         result = await session.execute(select(User).limit(1))
         if result.scalar_one_or_none() is not None:
@@ -84,22 +86,30 @@ async def seed_initial_admin() -> None:
                     password=settings.initial_admin_password,
                     is_superuser=True,
                     is_verified=True,
-                    role=UserRole.ADMIN.value,
+                    role="admin",
                     must_change_password=False,
                 )
             )
+            # Link to the system admin role
+            admin_role = await session.execute(
+                select(Role).where(Role.code == "admin")
+            )
+            role_obj = admin_role.scalar_one_or_none()
+            if role_obj:
+                result = await session.execute(
+                    select(User).where(User.id == user.id)
+                )
+                user_obj = result.scalar_one()
+                user_obj.role_id = role_obj.id
+                await session.commit()
+
             print(f"[seed] Created initial admin: {user.email}")
         except UserAlreadyExists:
             print(f"[seed] Admin {settings.initial_admin_email} already exists.")
 
 
 async def seed_initial_models() -> None:
-    """Insert the two pre-installed LLM models if they're not in the table yet.
-
-    Idempotent: looks each model up by name and skips inserts that already
-    exist. After any changes (or even with no changes), regenerates the
-    llama-swap.yaml so the llm container always has a fresh config to read.
-    """
+    """Insert the two pre-installed LLM models if they're not in the table yet."""
     inserted_any = False
     async with async_session_maker() as session:
         for spec in INITIAL_MODELS:
@@ -114,11 +124,8 @@ async def seed_initial_models() -> None:
             print(f"[seed] Created LLM model: {spec['name']}")
         await session.commit()
 
-        # Always regenerate the swap config — even if no inserts happened, the
-        # backend may be starting against a fresh volume that has no yaml yet.
-        # Failures here are non-fatal: log and move on so the API stays usable.
         try:
             await regenerate_swap_config(session)
             print(f"[seed] Wrote {settings.llm_swap_config_path}")
-        except Exception as exc:  # pragma: no cover - filesystem edge cases
+        except Exception as exc:
             print(f"[seed] Failed to write swap config: {exc}")

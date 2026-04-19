@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.ws import resolve_user_from_token
 from app.db import async_session_maker
 from app.models.run import Edge, Run, Screen
-from app.models.user import UserRole
+from app.models.user import User
 from app.redis_bus import subscribe_run_events
 
 router = APIRouter(tags=["websocket"])
@@ -111,7 +111,7 @@ async def run_progress_ws(
         if run is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Run not found")
             return
-        if user.role != UserRole.ADMIN.value and run.user_id != user.id:
+        if "users.view" not in (user.permissions or []) and run.user_id != user.id:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Forbidden")
             return
 

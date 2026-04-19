@@ -30,7 +30,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from app.auth.ws import resolve_user_from_token
-from app.models.user import UserRole
+from app.models.user import User
 from app.redis_bus import channel_for_download, subscribe_events
 
 router = APIRouter(tags=["websocket"])
@@ -53,7 +53,7 @@ async def download_progress_ws(
             code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token"
         )
         return
-    if user.role != UserRole.ADMIN.value:
+    if "models.download" not in (user.permissions or []):
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION, reason="Admin only"
         )
