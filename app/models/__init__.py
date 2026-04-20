@@ -13,6 +13,15 @@ from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocumen
 from app.models.llm_model import LLMModel
 from app.models.notification import Notification, WorkspaceInvitation
 from app.models.notification_type import NotificationType, WorkspaceNotificationSetting
+from app.models.reference import (
+    RefActionType,
+    RefDeviceType,
+    RefOsVersion,
+    RefPlatform,
+    RefTestDataType,
+    WorkspaceActionSetting,
+)
+from app.models.user_table_pref import UserTablePref
 from app.models.role import Role
 from app.models.run import Edge, Run, RunMode, RunStatus, Screen
 from app.models.scenario import Scenario

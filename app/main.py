@@ -33,6 +33,7 @@ from app.api import notifications as notifications_api
 from app.api import attributes as attributes_api
 from app.api import custom_dictionaries as custom_dicts_api
 from app.api import notification_types as notif_types_api
+from app.api import reference as reference_api
 from app.auth.users import auth_backend, fastapi_users
 from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
@@ -169,5 +170,7 @@ app.include_router(attributes_api.val_router)
 app.include_router(custom_dicts_api.router)
 app.include_router(notif_types_api.types_router)
 app.include_router(notif_types_api.ws_router)
+app.include_router(reference_api.router)
+app.include_router(reference_api.prefs_router)
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)
