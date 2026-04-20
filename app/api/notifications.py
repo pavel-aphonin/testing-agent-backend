@@ -268,6 +268,10 @@ async def accept_invitation(
     if inv.status != "pending":
         raise HTTPException(400, f"Invitation is already {inv.status}")
 
+    # Enforce max_members
+    from app.api.workspaces import _check_member_limit
+    await _check_member_limit(inv.workspace_id, session)
+
     # Add as member
     member = WorkspaceMember(
         workspace_id=inv.workspace_id,

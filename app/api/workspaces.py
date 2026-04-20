@@ -59,6 +59,62 @@ async def _get_workspace(
     return ws
 
 
+async def _get_workspace_attr_value(
+    ws_id: UUID, attr_code: str, session: AsyncSession,
+) -> object | None:
+    """Read an attribute value attached to a workspace by attribute code.
+
+    Returns the explicit value if set, otherwise the attribute's default,
+    otherwise None.
+    """
+    from app.models.attribute import Attribute, AttributeValue
+
+    res = await session.execute(
+        select(Attribute).where(
+            Attribute.code == attr_code,
+            Attribute.applies_to == "workspace",
+        )
+    )
+    attr = res.scalar_one_or_none()
+    if attr is None:
+        return None
+    val_res = await session.execute(
+        select(AttributeValue).where(
+            AttributeValue.attribute_id == attr.id,
+            AttributeValue.entity_type == "workspace",
+            AttributeValue.entity_id == ws_id,
+        )
+    )
+    val_row = val_res.scalar_one_or_none()
+    if val_row is not None and val_row.value is not None:
+        return val_row.value
+    return attr.default_value
+
+
+async def _check_member_limit(ws_id: UUID, session: AsyncSession) -> None:
+    """Raise 400 if adding a member would exceed the workspace's max_members.
+
+    max_members is a system attribute. 0 or null = unlimited.
+    """
+    raw = await _get_workspace_attr_value(ws_id, "max_members", session)
+    try:
+        limit = int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= 0:
+        return  # unlimited
+
+    res = await session.execute(
+        select(WorkspaceMember).where(WorkspaceMember.workspace_id == ws_id)
+    )
+    current_count = len(list(res.scalars().all()))
+    if current_count >= limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Достигнут лимит участников пространства: {limit}",
+        )
+
+
 async def _require_ws_role(
     ws_id: UUID, user: User, session: AsyncSession, min_role: WsRole = WsRole.MODERATOR
 ) -> WorkspaceMember:
@@ -315,6 +371,9 @@ async def add_member(
     )
     if exists.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="User is already a member")
+
+    # Enforce max_members attribute (if set)
+    await _check_member_limit(ws_id, session)
 
     valid_roles = {WsRole.MEMBER.value, WsRole.MODERATOR.value}
     role = payload.role if payload.role in valid_roles else WsRole.MEMBER.value
