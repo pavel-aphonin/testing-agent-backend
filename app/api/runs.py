@@ -151,6 +151,32 @@ async def create_run_v2(
         workspace_id=payload.workspace_id,
     )
     session.add(run)
+    await session.flush()
+
+    # Persist any run-scoped attribute values shipped with the request.
+    if payload.attribute_values:
+        from app.models.attribute import Attribute, AttributeValue
+        from uuid import UUID as _UUID
+        for attr_id_str, val in payload.attribute_values.items():
+            try:
+                attr_id = _UUID(attr_id_str)
+            except (ValueError, TypeError):
+                continue
+            attr = await session.get(Attribute, attr_id)
+            if attr is None or attr.applies_to != "run":
+                continue
+            if attr.is_required and (val is None or val == "" or val == []):
+                raise HTTPException(
+                    422,
+                    f"Атрибут «{attr.name}» обязателен для заполнения",
+                )
+            session.add(AttributeValue(
+                attribute_id=attr_id,
+                entity_type="run",
+                entity_id=run.id,
+                value=val,
+            ))
+
     await session.commit()
     await session.refresh(run)
     return run

@@ -44,6 +44,10 @@ class RunCreateV2(BaseModel):
     # Workspace this run belongs to. The frontend sends the active
     # workspace from the WorkspaceSwitcher.
     workspace_id: UUID | None = None
+    # Run-scoped attribute values: { attribute_id: value }. Backend
+    # persists each as an AttributeValue row with entity_type="run"
+    # and entity_id=new_run.id.
+    attribute_values: dict[str, object] | None = None
 
 
 class RunRead(BaseModel):
