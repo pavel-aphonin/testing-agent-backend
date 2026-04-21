@@ -60,17 +60,25 @@ async def emit_event(
             q = q.where(AppInstallation.workspace_id == workspace_id)
         result = await session.execute(q)
 
-        to_deliver: list[tuple[AppInstallation, str]] = []
+        # Collect webhook + builtin targets separately.
+        to_webhook: list[tuple[AppInstallation, str]] = []
+        to_builtin: list[tuple[AppInstallation, str]] = []
         for inst, ver in result.all():
             hooks = (ver.manifest or {}).get("hooks") or []
             for h in hooks:
-                if h.get("event") == event:
-                    webhook_url = (inst.settings or {}).get("webhook_url")
-                    if webhook_url:
-                        to_deliver.append((inst, webhook_url))
-                        break
+                if h.get("event") != event:
+                    continue
+                handler = h.get("handler") or ""
+                if handler.startswith("builtin:"):
+                    to_builtin.append((inst, handler[len("builtin:"):]))
+                    break
+                webhook_url = (inst.settings or {}).get("webhook_url")
+                if webhook_url:
+                    to_webhook.append((inst, webhook_url))
+                    break
 
-        for inst, url in to_deliver:
+        # Webhooks: record a delivery row and POST asynchronously.
+        for inst, url in to_webhook:
             delivery = AppEventDelivery(
                 installation_id=inst.id,
                 event=event,
@@ -78,9 +86,24 @@ async def emit_event(
             )
             session.add(delivery)
             await session.flush()
-            # Schedule the actual POST without blocking the commit.
             asyncio.create_task(_deliver(delivery.id, url, event, payload))
         await session.commit()
+
+        # Builtins: run in-process, also record a delivery row for audit.
+        from app.services.app_builtins import dispatch_builtin
+
+        for inst, builtin_name in to_builtin:
+            async with async_session_maker() as s2:
+                d = AppEventDelivery(
+                    installation_id=inst.id,
+                    event=event,
+                    payload=payload,
+                    status="delivered",
+                )
+                s2.add(d)
+                await s2.commit()
+            # fire-and-forget
+            asyncio.create_task(dispatch_builtin(builtin_name, inst, payload))
 
 
 async def _deliver(delivery_id: UUID, url: str, event: str, payload: dict) -> None:

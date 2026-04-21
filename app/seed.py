@@ -109,9 +109,10 @@ async def seed_initial_admin() -> None:
 
 
 async def seed_demo_apps() -> None:
-    """Pack and register the 'hello-world' demo bundle as an approved
-    public app. Idempotent — skipped if the code already exists."""
+    """Pack and register every bundle in app/seed_apps/ as an approved
+    public app. Idempotent — skips apps that already exist."""
     import io
+    import json as _json
     import zipfile
     from datetime import datetime, timezone
     from pathlib import Path
@@ -123,54 +124,64 @@ async def seed_demo_apps() -> None:
     )
     from app.services.app_bundle import extract_and_validate
 
-    seed_dir = Path(__file__).parent / "seed_apps" / "hello-world"
-    if not (seed_dir / "manifest.json").exists():
+    apps_root = Path(__file__).parent / "seed_apps"
+    if not apps_root.exists():
         return
 
     async with async_session_maker() as session:
-        # Already seeded?
-        q = await session.execute(select(AppPackage).where(AppPackage.code == "hello-world"))
-        if q.scalar_one_or_none() is not None:
-            print("[seed] Hello World app already present.")
-            return
+        for seed_dir in sorted(apps_root.iterdir()):
+            if not seed_dir.is_dir() or not (seed_dir / "manifest.json").exists():
+                continue
 
-        # Build ZIP in memory
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for path in seed_dir.rglob("*"):
-                if path.is_file():
-                    zf.write(path, path.relative_to(seed_dir).as_posix())
-        zip_bytes = buf.getvalue()
+            # Peek at the manifest to check uniqueness before doing work.
+            try:
+                manifest_raw = _json.loads((seed_dir / "manifest.json").read_text())
+                code = manifest_raw.get("code")
+            except Exception:  # noqa: BLE001
+                continue
+            if not code:
+                continue
 
-        try:
-            extracted = extract_and_validate(zip_bytes)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[seed] Hello World extract failed: {exc}")
-            return
+            q = await session.execute(select(AppPackage).where(AppPackage.code == code))
+            if q.scalar_one_or_none() is not None:
+                continue  # already seeded
 
-        pkg = AppPackage(
-            code=extracted.manifest.code,
-            name=extracted.manifest.name,
-            description=extracted.manifest.description,
-            category=extracted.manifest.category,
-            author=extracted.manifest.author,
-            logo_path=extracted.logo_relpath,
-            is_public=True,
-            approval_status=AppApprovalStatus.APPROVED.value,
-            approved_at=datetime.now(timezone.utc),
-        )
-        session.add(pkg)
-        await session.flush()
-        version = AppPackageVersion(
-            app_package_id=pkg.id,
-            version=extracted.manifest.version,
-            manifest=extracted.manifest.model_dump(),
-            bundle_path=extracted.bundle_relpath,
-            size_bytes=extracted.size_bytes,
-        )
-        session.add(version)
-        await session.commit()
-        print(f"[seed] Registered demo app: {pkg.name} v{version.version}")
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for path in seed_dir.rglob("*"):
+                    if path.is_file():
+                        zf.write(path, path.relative_to(seed_dir).as_posix())
+            zip_bytes = buf.getvalue()
+
+            try:
+                extracted = extract_and_validate(zip_bytes)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[seed] {code} extract failed: {exc}")
+                continue
+
+            pkg = AppPackage(
+                code=extracted.manifest.code,
+                name=extracted.manifest.name,
+                description=extracted.manifest.description,
+                category=extracted.manifest.category,
+                author=extracted.manifest.author,
+                logo_path=extracted.logo_relpath,
+                is_public=True,
+                approval_status=AppApprovalStatus.APPROVED.value,
+                approved_at=datetime.now(timezone.utc),
+            )
+            session.add(pkg)
+            await session.flush()
+            version = AppPackageVersion(
+                app_package_id=pkg.id,
+                version=extracted.manifest.version,
+                manifest=extracted.manifest.model_dump(),
+                bundle_path=extracted.bundle_relpath,
+                size_bytes=extracted.size_bytes,
+            )
+            session.add(version)
+            await session.commit()
+            print(f"[seed] Registered app: {pkg.name} v{version.version}")
 
 
 async def seed_initial_models() -> None:

@@ -87,6 +87,7 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
             # Extract files, strip the wrapping folder prefix if present,
             # refuse any entry that would escape the target dir.
             logo_rel: str | None = None
+            screenshots: list[str] = []
             for info in zf.infolist():
                 name = info.filename
                 if prefix and name.startswith(prefix):
@@ -103,6 +104,20 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
 
                 if Path(name).name in ("logo.png", "logo.jpg", "logo.jpeg", "logo.svg"):
                     logo_rel = f"{BUNDLES_SUBDIR}/{manifest_obj.code}/{manifest_obj.version}/{name}"
+                # Auto-discover screenshots from the screenshots/ folder.
+                parts = Path(name).parts
+                if parts and parts[0] == "screenshots":
+                    ext = Path(name).suffix.lower()
+                    if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}:
+                        screenshots.append(name)
+
+            # Attach screenshots to the manifest (if author didn't list them
+            # explicitly, we fill from autodiscover).
+            if not manifest_obj.screenshots and screenshots:
+                from app.schemas.app_package import ManifestScreenshot
+                manifest_obj.screenshots = [
+                    ManifestScreenshot(path=p) for p in sorted(screenshots)
+                ]
 
             # Sanity: manifest references must exist
             for slot in manifest_obj.ui_slots:

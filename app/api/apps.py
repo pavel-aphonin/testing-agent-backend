@@ -647,6 +647,36 @@ async def install_app(
         if ver is None:
             raise HTTPException(400, "У приложения нет подходящих версий")
 
+    # Manifest-declared RBAC: refuse install when the installer doesn't
+    # meet role_required / permissions_required. Admins bypass.
+    is_admin = _has_perm(user, "users.view")
+    if not is_admin:
+        manifest = ver.manifest or {}
+        user_perms = set(user.permissions or [])
+        required_perms = set(manifest.get("permissions_required") or [])
+        missing_perms = required_perms - user_perms
+        if missing_perms:
+            raise HTTPException(
+                403,
+                f"Не хватает прав для установки: {sorted(missing_perms)}",
+            )
+        required_roles = manifest.get("role_required") or []
+        if required_roles:
+            # Check installer's role in THIS workspace is among required
+            mem_q = await session.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == ws_id,
+                    WorkspaceMember.user_id == user.id,
+                )
+            )
+            member = mem_q.scalar_one_or_none()
+            member_role = member.role if member else None
+            if member_role not in required_roles:
+                raise HTTPException(
+                    403,
+                    f"Требуется роль в пространстве: {required_roles}",
+                )
+
     inst = AppInstallation(
         workspace_id=ws_id,
         app_package_id=pkg.id,
@@ -764,6 +794,99 @@ async def get_installation_token(
         "installation_id": inst_id,
         "workspace_id": ws_id,
         "permissions": granted,
+    }
+
+
+@router.get("/builtins/jira/ping")
+async def jira_ping(
+    installation_id: UUID,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Verify Jira settings by hitting /rest/api/2/myself."""
+    import base64
+    import httpx
+
+    inst = await session.get(AppInstallation, installation_id)
+    if inst is None or str(inst.id) != claims["inst"]:
+        raise HTTPException(403, "Installation mismatch")
+    s = inst.settings or {}
+    url = (s.get("jira_url") or "").rstrip("/")
+    email = s.get("api_email")
+    token = s.get("api_token")
+    if not url or not email or not token:
+        raise HTTPException(400, "Не заполнены jira_url / api_email / api_token")
+
+    creds = base64.b64encode(f"{email}:{token}".encode()).decode()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{url}/rest/api/2/myself",
+                headers={"Authorization": f"Basic {creds}", "Accept": "application/json"},
+            )
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code, r.text[:500])
+        data = r.json()
+        return {"user": data.get("displayName") or data.get("emailAddress") or "OK"}
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"Jira недоступна: {e}") from e
+
+
+class _JiraCreateRequest(BaseModel):
+    installation_id: UUID
+    summary: str
+    description: str | None = None
+    priority: str | None = None
+
+
+@router.post("/builtins/jira/create")
+async def jira_create_manual(
+    payload: _JiraCreateRequest,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Create a Jira issue manually from the iframe."""
+    import base64
+    import httpx
+
+    inst = await session.get(AppInstallation, payload.installation_id)
+    if inst is None or str(inst.id) != claims["inst"]:
+        raise HTTPException(403, "Installation mismatch")
+    s = inst.settings or {}
+    url = (s.get("jira_url") or "").rstrip("/")
+    project = s.get("project_key")
+    issue_type = s.get("default_issue_type") or "Bug"
+    email = s.get("api_email")
+    token = s.get("api_token")
+    if not url or not project or not email or not token:
+        raise HTTPException(400, "Не все настройки Jira заполнены")
+    creds = base64.b64encode(f"{email}:{token}".encode()).decode()
+
+    body = {
+        "fields": {
+            "project": {"key": project},
+            "issuetype": {"name": issue_type},
+            "summary": payload.summary,
+            "description": payload.description or "",
+            "priority": {"name": payload.priority or "Medium"},
+        }
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{url}/rest/api/2/issue",
+            headers={
+                "Authorization": f"Basic {creds}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text[:500])
+    data = r.json()
+    return {
+        "key": data.get("key"),
+        "url": f"{url}/browse/{data.get('key')}",
     }
 
 

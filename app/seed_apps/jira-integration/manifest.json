@@ -1,0 +1,26 @@
+{
+  "code": "jira-integration",
+  "version": "1.0.0",
+  "name": "Jira интеграция",
+  "description": "Автоматически заводит баги в Jira из найденных агентом дефектов. Позволяет вручную создать issue из результатов запуска. Поддерживает Jira Cloud и Server.",
+  "category": "integration",
+  "author": "Alfa Bank / Markov team",
+  "permissions_required": ["defects.view", "runs.view"],
+  "role_required": [],
+  "ui_slots": [
+    {"slot": "sidebar", "label": "Jira", "icon": "BugOutlined", "path": "frontend/index.html"},
+    {"slot": "run_actions", "label": "Создать в Jira", "icon": "BugOutlined", "path": "frontend/create_issue.html"}
+  ],
+  "settings_schema": [
+    {"code": "jira_url", "name": "URL Jira", "type": "string", "required": true, "description": "Например: https://alfa.atlassian.net"},
+    {"code": "api_email", "name": "Email для API", "type": "string", "required": true, "description": "Email учётной записи Jira Cloud"},
+    {"code": "api_token", "name": "API-токен", "type": "secret", "required": true, "description": "Создаётся в Profile → Security → API tokens"},
+    {"code": "project_key", "name": "Ключ проекта", "type": "string", "required": true, "description": "Например: MARKOV или QA"},
+    {"code": "default_issue_type", "name": "Тип задачи", "type": "enum", "enum_values": ["Bug", "Task", "Story", "Epic"], "default": "Bug", "required": true},
+    {"code": "priorities", "name": "Соответствие приоритетов (JSON)", "type": "string", "description": "Как маппить P0/P1/P2/P3 в Jira priority. Пример: {\"P0\":\"Highest\",\"P1\":\"High\",\"P2\":\"Medium\",\"P3\":\"Low\"}", "default": "{\"P0\":\"Highest\",\"P1\":\"High\",\"P2\":\"Medium\",\"P3\":\"Low\"}"},
+    {"code": "auto_create_priorities", "name": "Автосоздавать для приоритетов", "type": "string", "description": "Через запятую: P0,P1 — будут автоматически попадать в Jira; остальные — только вручную", "default": "P0,P1"}
+  ],
+  "hooks": [
+    {"event": "defect.created", "handler": "builtin:jira.create_issue"}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "code": "alfagen-integration",
+  "version": "1.0.0",
+  "name": "AlfaGen интеграция",
+  "description": "Отправляет найденные дефекты в AlfaGen для генерации и сохранения тест-кейсов. Позволяет вручную связать запуск с документом AlfaGen.",
+  "category": "integration",
+  "author": "Alfa Bank / Markov team",
+  "permissions_required": ["defects.view", "runs.view"],
+  "role_required": [],
+  "ui_slots": [
+    {"slot": "sidebar", "label": "AlfaGen", "icon": "RobotOutlined", "path": "frontend/index.html"}
+  ],
+  "settings_schema": [
+    {"code": "api_url", "name": "URL AlfaGen", "type": "string", "required": true, "description": "Например: https://alfagen-sandbox.alfabank.ru"},
+    {"code": "api_token", "name": "API-токен", "type": "secret", "required": true},
+    {"code": "auto_send_priorities", "name": "Автоотправка приоритетов", "type": "string", "default": "P0,P1,P2", "description": "Через запятую — какие приоритеты отправлять автоматически"}
+  ],
+  "hooks": [
+    {"event": "defect.created", "handler": "builtin:alfagen.send_defect"}
+  ]
+}

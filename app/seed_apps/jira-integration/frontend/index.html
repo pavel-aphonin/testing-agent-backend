@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Jira интеграция</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #fafafa;
+      color: #333;
+    }
+    h1 { color: #0052CC; margin-top: 0; }
+    .card {
+      background: #fff;
+      border: 1px solid #eee;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .muted { color: #999; font-size: 12px; }
+    code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
+    button {
+      background: #0052CC;
+      color: white;
+      border: 0;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status-ok { color: #006644; }
+    .status-err { color: #BF2600; }
+    pre { font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>Jira интеграция</h1>
+  <p class="muted" id="greeting">Ожидаем токен…</p>
+
+  <div class="card">
+    <h3>Проверка подключения</h3>
+    <p class="muted">Нажмите кнопку, чтобы убедиться что настройки верны и Jira отвечает.</p>
+    <button id="ping">Проверить</button>
+    <div id="ping-result" style="margin-top: 12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Последние автосозданные issue</h3>
+    <p class="muted">Все issue, созданные этой интеграцией для дефектов P0/P1 (по умолчанию).</p>
+    <div id="recent">Загрузка…</div>
+  </div>
+
+  <div class="card">
+    <h3>Настройки (readonly из installation.settings)</h3>
+    <pre id="settings-preview">—</pre>
+  </div>
+
+<script>
+  let token = null, apiBase = null, ctx = null;
+
+  window.addEventListener("message", async (evt) => {
+    if (!evt.data || evt.data.type !== "markov.bootstrap") return;
+    token = evt.data.token;
+    apiBase = evt.data.apiBase ?? "";
+
+    const r = await fetch(apiBase + "/api/apps/me/context", {
+      headers: { Authorization: "Bearer " + token },
+    });
+    ctx = await r.json();
+    document.getElementById("greeting").textContent =
+      `Пространство: ${ctx.workspace_id.slice(0,8)}…`;
+
+    const s = ctx.settings || {};
+    // Hide secrets for display
+    const display = { ...s };
+    if (display.api_token) display.api_token = "***";
+    document.getElementById("settings-preview").textContent =
+      JSON.stringify(display, null, 2);
+  });
+
+  document.getElementById("ping").onclick = async () => {
+    const btn = document.getElementById("ping");
+    btn.disabled = true;
+    btn.textContent = "Проверяем…";
+    const out = document.getElementById("ping-result");
+    try {
+      const r = await fetch(
+        apiBase + "/api/apps/builtins/jira/ping?installation_id=" + ctx.installation_id,
+        { headers: { Authorization: "Bearer " + token } },
+      );
+      const data = await r.json();
+      if (r.ok) {
+        out.innerHTML = `<span class="status-ok">✓ Подключено: ${data.user || "OK"}</span>`;
+      } else {
+        out.innerHTML = `<span class="status-err">✗ ${data.detail || r.statusText}</span>`;
+      }
+    } catch (e) {
+      out.innerHTML = `<span class="status-err">✗ ${e.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Проверить";
+    }
+  };
+
+  window.parent.postMessage({ type: "markov.ready" }, "*");
+</script>
+</body>
+</html>

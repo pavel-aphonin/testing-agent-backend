@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>AlfaGen</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 24px; background: #fafafa; color: #333; }
+    h1 { color: #EE3424; margin-top: 0; }
+    .muted { color: #999; font-size: 12px; }
+    .card { background: #fff; border: 1px solid #eee; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+    pre { background: #f5f5f5; padding: 12px; border-radius: 4px; font-size: 11px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>AlfaGen</h1>
+  <p class="muted">Интеграция с песочницей AlfaGen. Отправляет найденные дефекты для генерации тест-кейсов.</p>
+  <div class="card">
+    <h3>Настройки</h3>
+    <pre id="settings">—</pre>
+  </div>
+  <div class="card">
+    <h3>Статус</h3>
+    <p>Приложение работает. Дефекты с приоритетами из <code id="auto-prios">—</code> отправляются автоматически.</p>
+    <p class="muted">Хэндлер: <code>builtin:alfagen.send_defect</code>. Логи доставки — в таблице <code>app_event_deliveries</code>.</p>
+  </div>
+
+<script>
+  window.addEventListener("message", async (evt) => {
+    if (!evt.data || evt.data.type !== "markov.bootstrap") return;
+    const r = await fetch(evt.data.apiBase + "/api/apps/me/context", {
+      headers: { Authorization: "Bearer " + evt.data.token },
+    });
+    const ctx = await r.json();
+    const s = ctx.settings || {};
+    if (s.api_token) s.api_token = "***";
+    document.getElementById("settings").textContent = JSON.stringify(s, null, 2);
+    document.getElementById("auto-prios").textContent = s.auto_send_priorities || "P0,P1,P2";
+  });
+  window.parent.postMessage({ type: "markov.ready" }, "*");
+</script>
+</body>
+</html>

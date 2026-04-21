@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Создать issue в Jira</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; background: #fafafa; }
+    h1 { color: #0052CC; margin-top: 0; font-size: 20px; }
+    .card { background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #eee; }
+    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; }
+    input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+    textarea { min-height: 100px; resize: vertical; }
+    button { margin-top: 16px; background: #0052CC; color: white; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .muted { color: #999; font-size: 12px; }
+    .err { color: #BF2600; margin-top: 12px; }
+    .ok { color: #006644; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Создать баг в Jira</h1>
+  <p class="muted">Запуск: <code id="run-id">—</code></p>
+
+  <div class="card">
+    <label>Summary</label>
+    <input id="summary" placeholder="Краткое описание">
+
+    <label>Описание</label>
+    <textarea id="description" placeholder="Шаги воспроизведения, ожидаемый результат, фактический..."></textarea>
+
+    <label>Priority</label>
+    <select id="priority">
+      <option value="Highest">Highest</option>
+      <option value="High">High</option>
+      <option value="Medium" selected>Medium</option>
+      <option value="Low">Low</option>
+    </select>
+
+    <button id="submit">Создать issue</button>
+    <div id="status"></div>
+  </div>
+
+<script>
+  let token = null, apiBase = null, ctx = null;
+
+  window.addEventListener("message", async (evt) => {
+    if (!evt.data || evt.data.type !== "markov.bootstrap") return;
+    token = evt.data.token;
+    apiBase = evt.data.apiBase ?? "";
+    const context = evt.data.context || {};
+    document.getElementById("run-id").textContent = context.run_id || "не передан";
+
+    const r = await fetch(apiBase + "/api/apps/me/context", {
+      headers: { Authorization: "Bearer " + token },
+    });
+    ctx = await r.json();
+  });
+
+  document.getElementById("submit").onclick = async () => {
+    const statusEl = document.getElementById("status");
+    statusEl.textContent = "";
+    const body = {
+      installation_id: ctx.installation_id,
+      summary: document.getElementById("summary").value,
+      description: document.getElementById("description").value,
+      priority: document.getElementById("priority").value,
+    };
+    try {
+      const r = await fetch(apiBase + "/api/apps/builtins/jira/create", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        statusEl.innerHTML = `<div class="ok">✓ Создан: <a href="${data.url}" target="_blank">${data.key}</a></div>`;
+      } else {
+        statusEl.innerHTML = `<div class="err">✗ ${data.detail || r.statusText}</div>`;
+      }
+    } catch (e) {
+      statusEl.innerHTML = `<div class="err">✗ ${e.message}</div>`;
+    }
+  };
+
+  window.parent.postMessage({ type: "markov.ready" }, "*");
+</script>
+</body>
+</html>

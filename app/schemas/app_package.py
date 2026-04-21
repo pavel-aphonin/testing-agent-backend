@@ -54,6 +54,15 @@ class ManifestHook(BaseModel):
     handler: str
 
 
+class ManifestScreenshot(BaseModel):
+    """Gallery image shown on the app detail page. Paths are relative
+    to the bundle root; filled automatically by the extractor from
+    everything under screenshots/."""
+
+    path: str
+    caption: str | None = None
+
+
 class AppManifest(BaseModel):
     code: str = Field(..., pattern=r"^[a-z][a-z0-9_-]*$", min_length=1, max_length=100)
     version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
@@ -70,6 +79,7 @@ class AppManifest(BaseModel):
     ui_slots: list[ManifestSlot] = Field(default_factory=list)
     settings_schema: list[ManifestSettingField] = Field(default_factory=list)
     hooks: list[ManifestHook] = Field(default_factory=list)
+    screenshots: list[ManifestScreenshot] = Field(default_factory=list)
 
 
 # ── API schemas ──────────────────────────────────────────────────────────────
