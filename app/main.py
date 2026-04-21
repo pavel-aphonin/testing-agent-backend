@@ -34,10 +34,15 @@ from app.api import attributes as attributes_api
 from app.api import custom_dictionaries as custom_dicts_api
 from app.api import notification_types as notif_types_api
 from app.api import reference as reference_api
+from app.api import apps as apps_api
 from app.auth.users import auth_backend, fastapi_users
 from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
     AgentSettings,
+    AppInstallation,
+    AppPackage,
+    AppPackageVersion,
+    AppReview,
     Attribute,
     AttributeValue,
     CustomDictionary,
@@ -98,9 +103,41 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Testing Agent API",
-    version="0.1.0",
+    title="Марков — Testing Agent API",
+    version="0.5.0",
+    description=(
+        "HTTP API платформы «Марков». Все эндпоинты (кроме `/auth/jwt/login`) "
+        "требуют JWT в заголовке `Authorization: Bearer <token>`.\n\n"
+        "**Расширения / приложения** используют этот же API — установка в "
+        "рабочее пространство через `/api/workspaces/{id}/apps`, загрузка "
+        "собственного приложения через `/api/apps/upload`.\n\n"
+        "UI документации: [/docs](/docs) (Swagger), [/redoc](/redoc) (ReDoc)."
+    ),
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "auth", "description": "Аутентификация (JWT)."},
+        {"name": "runs", "description": "Запуски исследования приложений."},
+        {"name": "scenarios", "description": "Сценарии тестирования."},
+        {"name": "test-data", "description": "Тестовые данные для подстановки в сценарии."},
+        {"name": "defects", "description": "Найденные агентом дефекты."},
+        {"name": "workspaces", "description": "Рабочие пространства (команды / проекты)."},
+        {"name": "workspace-apps", "description": "Установленные в пространстве приложения."},
+        {"name": "apps", "description": "Магазин расширений + загрузка / модерация."},
+        {"name": "notifications", "description": "Уведомления (колокольчик)."},
+        {"name": "invitations", "description": "Приглашения в рабочие пространства."},
+        {"name": "dictionaries-roles", "description": "Справочник ролей + permissions."},
+        {"name": "custom-dictionaries", "description": "Пользовательские справочники per-workspace."},
+        {"name": "notification-types", "description": "Справочник типов уведомлений."},
+        {"name": "attributes", "description": "Атрибуты (метаданные объектов)."},
+        {"name": "attribute-values", "description": "Значения атрибутов."},
+        {"name": "reference", "description": "Системные справочники: платформы, ОС, устройства, действия."},
+        {"name": "table-prefs", "description": "Настройки колонок таблиц (per-user)."},
+        {"name": "admin-users", "description": "Управление пользователями."},
+        {"name": "admin-workspaces", "description": "Администрирование пространств."},
+        {"name": "knowledge", "description": "База знаний для RAG."},
+        {"name": "llm-models", "description": "Управление моделями LLM."},
+        {"name": "websocket", "description": "Live-стримы прогресса и событий."},
+    ],
 )
 
 app.add_middleware(
@@ -172,5 +209,7 @@ app.include_router(notif_types_api.types_router)
 app.include_router(notif_types_api.ws_router)
 app.include_router(reference_api.router)
 app.include_router(reference_api.prefs_router)
+app.include_router(apps_api.router)
+app.include_router(apps_api.ws_apps_router)
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)

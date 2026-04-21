@@ -1,6 +1,12 @@
 """SQLAlchemy ORM models. Importing this module registers all tables on Base.metadata."""
 
 from app.models.agent_settings import AgentSettings
+from app.models.app_package import (
+    AppInstallation,
+    AppPackage,
+    AppPackageVersion,
+    AppReview,
+)
 from app.models.attribute import Attribute, AttributeValue
 from app.models.custom_dictionary import (
     CustomDictionary,
@@ -31,6 +37,10 @@ from app.models.workspace import Workspace, WorkspaceMember, WsRole
 
 __all__ = [
     "AgentSettings",
+    "AppInstallation",
+    "AppPackage",
+    "AppPackageVersion",
+    "AppReview",
     "Attribute",
     "AttributeValue",
     "CustomDictionary",
