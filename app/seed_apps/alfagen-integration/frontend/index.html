@@ -2,41 +2,438 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>AlfaGen</title>
+  <title>AlfaGen Sandbox</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 24px; background: #fafafa; color: #333; }
-    h1 { color: #EE3424; margin-top: 0; }
-    .muted { color: #999; font-size: 12px; }
-    .card { background: #fff; border: 1px solid #eee; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
-    pre { background: #f5f5f5; padding: 12px; border-radius: 4px; font-size: 11px; overflow: auto; }
+    :root {
+      --primary: #EE3424;
+      --bg: #fafafa;
+      --card: #fff;
+      --border: #eee;
+      --muted: #999;
+      --text: #333;
+      --ok: #52c41a;
+      --err: #cf1322;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { color: var(--primary); margin-top: 0; display: flex; align-items: center; gap: 12px; }
+    h1 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    h1.connected .status-dot { background: var(--ok); }
+    h1.error .status-dot { background: var(--err); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+    code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
+    button {
+      background: var(--primary);
+      color: white;
+      border: 0;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.secondary { background: #f0f0f0; color: #333; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+    .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; font-size: 14px; }
+    .tab.active { border-bottom-color: var(--primary); color: var(--primary); font-weight: 600; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    input, textarea, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; }
+    .msg { padding: 10px 12px; margin-bottom: 8px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
+    .msg.user { background: #F1F5F9; }
+    .msg.assistant { background: #FEF3F2; border-left: 3px solid var(--primary); }
+    .msg .role { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
+    .msg .content { white-space: pre-wrap; }
+    .file-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #f5f5f5;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      margin-right: 6px;
+      margin-top: 4px;
+    }
+    .file-pill.active { background: #FEF3F2; border: 1px solid var(--primary); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table th, table td { padding: 6px; text-align: left; border-bottom: 1px solid var(--border); }
+    table th { background: #fafafa; font-weight: 600; }
+    .progress { height: 4px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 8px; }
+    .progress > div { height: 100%; background: var(--primary); transition: width 0.3s; }
+    .error { color: var(--err); padding: 8px 12px; background: #FEF2F2; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+    .ok { color: var(--ok); padding: 8px 12px; background: #F0FDF4; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+    pre { font-size: 11px; background: #f5f5f5; padding: 8px; border-radius: 4px; overflow: auto; }
   </style>
 </head>
 <body>
-  <h1>AlfaGen</h1>
-  <p class="muted">Интеграция с песочницей AlfaGen. Отправляет найденные дефекты для генерации тест-кейсов.</p>
-  <div class="card">
-    <h3>Настройки</h3>
-    <pre id="settings">—</pre>
+  <h1 id="header">
+    <span class="status-dot"></span>
+    AlfaGen Sandbox
+  </h1>
+  <p class="muted" id="subheader">Ожидаем инициализации…</p>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="chat">💬 Чат</div>
+    <div class="tab" data-tab="files">📄 Файлы / RAG</div>
+    <div class="tab" data-tab="models">🧠 Модели</div>
+    <div class="tab" data-tab="info">⚙️ Подключение</div>
   </div>
-  <div class="card">
-    <h3>Статус</h3>
-    <p>Приложение работает. Дефекты с приоритетами из <code id="auto-prios">—</code> отправляются автоматически.</p>
-    <p class="muted">Хэндлер: <code>builtin:alfagen.send_defect</code>. Логи доставки — в таблице <code>app_event_deliveries</code>.</p>
+
+  <!-- ────────────── Chat ────────────── -->
+  <div class="tab-panel active" data-tab="chat">
+    <div class="card">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <strong>Модель:</strong>
+        <select id="chat-model" style="width:auto;flex:1;max-width:360px;"></select>
+        <button class="secondary" id="chat-clear">Очистить</button>
+      </div>
+      <div id="chat-files" style="margin-bottom:8px;"></div>
+      <div id="chat-log" style="max-height:40vh;overflow:auto;margin-bottom:12px;"></div>
+      <textarea id="chat-input" placeholder="Введите сообщение..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button id="chat-send">Отправить</button>
+        <span class="muted" id="chat-status"></span>
+      </div>
+      <div id="chat-error"></div>
+    </div>
+    <p class="muted">
+      Модели с поддержкой картинок помечены 👁. Чтобы прикрепить файл к запросу,
+      загрузите его во вкладке «Файлы / RAG» и нажмите на «прикрепить» у файла.
+    </p>
+  </div>
+
+  <!-- ────────────── Files ────────────── -->
+  <div class="tab-panel" data-tab="files">
+    <div class="card">
+      <label>Загрузить PDF / текст / документ</label>
+      <input type="file" id="file-input" accept=".pdf,.txt,.md,.docx,.html,.doc">
+      <button id="file-upload" style="margin-top:8px;">Загрузить</button>
+      <div class="progress" id="upload-progress" style="display:none;"><div style="width:0"></div></div>
+      <div id="upload-status"></div>
+    </div>
+    <div class="card">
+      <strong>Загруженные файлы (эта сессия)</strong>
+      <div id="files-list" class="muted" style="margin-top:8px;">Пока ничего не загружено</div>
+    </div>
+  </div>
+
+  <!-- ────────────── Models ────────────── -->
+  <div class="tab-panel" data-tab="models">
+    <div class="card">
+      <button id="models-refresh">Обновить</button>
+      <div id="models-list" style="margin-top:12px;">Нажмите «Обновить»</div>
+    </div>
+  </div>
+
+  <!-- ────────────── Info ────────────── -->
+  <div class="tab-panel" data-tab="info">
+    <div class="card">
+      <strong>Проверка подключения</strong>
+      <p class="muted">Обращается к <code>/internal/llm/v1/models</code> для проверки, что токен валиден и Sandbox отвечает.</p>
+      <button id="ping-btn">Проверить</button>
+      <div id="ping-result"></div>
+    </div>
+    <div class="card">
+      <strong>Настройки (readonly)</strong>
+      <p class="muted">Отредактируйте их в карточке установки приложения в разделе «Приложения пространства».</p>
+      <pre id="settings-preview">—</pre>
+    </div>
+    <div class="card">
+      <strong>Примечания</strong>
+      <ul class="muted" style="font-size:12px;">
+        <li>Sandbox доступен только из сети VPN / VDI Альфа-Банка</li>
+        <li>Лимит: 0.2 RPS (1 запрос в 5 секунд)</li>
+        <li>Срок: 3 месяца с момента выдачи ключа</li>
+        <li>Выдача ключа: ~2 рабочих дня через EYanovskaya@alfabank.ru</li>
+      </ul>
+    </div>
   </div>
 
 <script>
+  // ─────────── State ───────────
+  let token = null, apiBase = null, ctx = null;
+  const uploadedFiles = []; // {fileId, name, size, attached}
+  const chatHistory = [];   // OpenAI-compat messages for the model
+  const VISION_MODELS = ["qwen-2.5-32b-vl", "openai/qwen3-vl-30b-a3b-thinking"];
+
+  // ─────────── Tabs ───────────
+  document.querySelectorAll(".tab").forEach((el) => {
+    el.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+      el.classList.add("active");
+      document.querySelector(`.tab-panel[data-tab="${el.dataset.tab}"]`).classList.add("active");
+    });
+  });
+
+  // ─────────── Bootstrap ───────────
   window.addEventListener("message", async (evt) => {
     if (!evt.data || evt.data.type !== "markov.bootstrap") return;
-    const r = await fetch(evt.data.apiBase + "/api/apps/me/context", {
-      headers: { Authorization: "Bearer " + evt.data.token },
+    token = evt.data.token;
+    apiBase = evt.data.apiBase ?? "";
+
+    const r = await fetch(apiBase + "/api/apps/me/context", {
+      headers: { Authorization: "Bearer " + token },
     });
-    const ctx = await r.json();
-    const s = ctx.settings || {};
-    if (s.api_token) s.api_token = "***";
-    document.getElementById("settings").textContent = JSON.stringify(s, null, 2);
-    document.getElementById("auto-prios").textContent = s.auto_send_priorities || "P0,P1,P2";
+    ctx = await r.json();
+
+    document.getElementById("subheader").textContent =
+      `Пространство: ${ctx.workspace_id.slice(0,8)}… · Модель по умолчанию: ${ctx.settings?.default_model || "—"}`;
+
+    // Hide secrets for display
+    const disp = { ...(ctx.settings || {}) };
+    if (disp.api_token) disp.api_token = "***" + String(disp.api_token).slice(-4);
+    document.getElementById("settings-preview").textContent = JSON.stringify(disp, null, 2);
+
+    // Default model in chat selector
+    populateModelSelect([ctx.settings?.default_model].filter(Boolean));
+    // Auto-ping
+    ping();
   });
   window.parent.postMessage({ type: "markov.ready" }, "*");
+
+  // ─────────── Proxy helper ───────────
+  async function alfa(path, opts = {}) {
+    const url = `${apiBase}/api/apps/builtins/alfagen${path}`;
+    const params = opts.params || {};
+    params.installation_id = ctx.installation_id;
+    const qs = new URLSearchParams(params).toString();
+    const finalUrl = qs ? `${url}?${qs}` : url;
+    const fetchOpts = {
+      method: opts.method || "GET",
+      headers: {
+        Authorization: "Bearer " + token,
+        ...(opts.body ? { "Content-Type": "application/json" } : {}),
+      },
+    };
+    if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
+    if (opts.form) {
+      delete fetchOpts.headers["Content-Type"];
+      fetchOpts.body = opts.form;
+    }
+    const resp = await fetch(finalUrl, fetchOpts);
+    const data = resp.status === 204 ? null : await resp.json();
+    if (!resp.ok) {
+      const msg = data?.detail || resp.statusText;
+      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+    return data;
+  }
+
+  // ─────────── Ping ───────────
+  async function ping() {
+    const h = document.getElementById("header");
+    const r = document.getElementById("ping-result");
+    try {
+      const data = await alfa("/ping");
+      h.className = "connected";
+      if (r) r.innerHTML = `<div class="ok">✓ Подключено. Доступно моделей: ${data.models?.length ?? "?"}</div>`;
+      if (data.models) populateModelSelect(data.models.map((m) => m.id || m));
+    } catch (e) {
+      h.className = "error";
+      if (r) r.innerHTML = `<div class="error">✗ ${e.message}</div>`;
+    }
+  }
+  document.getElementById("ping-btn").onclick = ping;
+
+  // ─────────── Models ───────────
+  function populateModelSelect(models) {
+    const sel = document.getElementById("chat-model");
+    const current = sel.value;
+    sel.innerHTML = "";
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      const visionMark = VISION_MODELS.some((v) => m.includes(v)) ? " 👁" : "";
+      opt.textContent = m + visionMark;
+      sel.appendChild(opt);
+    }
+    if (current && models.includes(current)) sel.value = current;
+    else if (ctx?.settings?.default_model && models.includes(ctx.settings.default_model)) {
+      sel.value = ctx.settings.default_model;
+    }
+  }
+
+  document.getElementById("models-refresh").onclick = async () => {
+    const out = document.getElementById("models-list");
+    out.textContent = "Загрузка…";
+    try {
+      const data = await alfa("/models");
+      const items = data.data || data.models || [];
+      if (items.length === 0) {
+        out.innerHTML = "<span class=muted>Список пуст</span>";
+        return;
+      }
+      const rows = items.map((m) => {
+        const id = m.id || m;
+        return `<tr><td><code>${id}</code></td><td>${m.description || ""}</td></tr>`;
+      }).join("");
+      out.innerHTML = `<table><thead><tr><th>Модель</th><th>Описание</th></tr></thead><tbody>${rows}</tbody></table>`;
+      populateModelSelect(items.map((m) => m.id || m));
+    } catch (e) {
+      out.innerHTML = `<div class="error">${e.message}</div>`;
+    }
+  };
+
+  // ─────────── Files ───────────
+  document.getElementById("file-upload").onclick = async () => {
+    const input = document.getElementById("file-input");
+    const file = input.files?.[0];
+    if (!file) return;
+    const statusEl = document.getElementById("upload-status");
+    const progress = document.getElementById("upload-progress");
+    const bar = progress.querySelector("div");
+    statusEl.innerHTML = "";
+    progress.style.display = "block";
+    bar.style.width = "10%";
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const uploadResp = await alfa("/upload", { method: "POST", form: fd });
+      bar.style.width = "50%";
+      if (!uploadResp.task_id) throw new Error("Нет taskId в ответе");
+
+      // Poll status until file_id appears
+      let fileId = null;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = await alfa("/upload-status", { params: { task_id: uploadResp.task_id } });
+        if (s.status === "COMPLETED" && s.file_id) {
+          fileId = s.file_id;
+          break;
+        }
+        if (s.status === "FAILED") throw new Error(s.error || "Файл не обработан");
+        bar.style.width = Math.min(95, 50 + i * 2) + "%";
+      }
+      if (!fileId) throw new Error("Таймаут обработки файла");
+
+      bar.style.width = "100%";
+      statusEl.innerHTML = `<div class="ok">✓ Загружен: ${file.name} (${fileId.slice(0,8)}…)</div>`;
+      uploadedFiles.push({
+        fileId, name: file.name, size: file.size, attached: false,
+      });
+      renderFiles();
+      input.value = "";
+      setTimeout(() => { progress.style.display = "none"; bar.style.width = "0"; }, 800);
+    } catch (e) {
+      statusEl.innerHTML = `<div class="error">${e.message}</div>`;
+      progress.style.display = "none";
+    }
+  };
+
+  function renderFiles() {
+    const list = document.getElementById("files-list");
+    const chatFiles = document.getElementById("chat-files");
+    if (uploadedFiles.length === 0) {
+      list.textContent = "Пока ничего не загружено";
+      chatFiles.innerHTML = "";
+      return;
+    }
+    list.innerHTML = uploadedFiles.map((f, i) => `
+      <div class="file-pill ${f.attached ? 'active' : ''}" style="cursor:pointer;" onclick="window.__toggleAttach(${i})">
+        📄 ${f.name} · ${(f.size/1024).toFixed(1)} KB · ${f.attached ? "✓ в чате" : "прикрепить"}
+      </div>
+    `).join("");
+    chatFiles.innerHTML = uploadedFiles
+      .filter((f) => f.attached)
+      .map((f) => `<span class="file-pill active">📄 ${f.name}</span>`)
+      .join("");
+  }
+
+  window.__toggleAttach = (idx) => {
+    uploadedFiles[idx].attached = !uploadedFiles[idx].attached;
+    renderFiles();
+  };
+
+  // ─────────── Chat ───────────
+  function renderChatLog() {
+    const log = document.getElementById("chat-log");
+    log.innerHTML = chatHistory.filter((m) => m.role !== "system").map((m) => `
+      <div class="msg ${m.role}">
+        <div class="role">${m.role}</div>
+        <div class="content">${escapeHtml(typeof m.content === "string" ? m.content : JSON.stringify(m.content))}</div>
+      </div>
+    `).join("");
+    log.scrollTop = log.scrollHeight;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  document.getElementById("chat-send").onclick = async () => {
+    const input = document.getElementById("chat-input");
+    const btn = document.getElementById("chat-send");
+    const status = document.getElementById("chat-status");
+    const err = document.getElementById("chat-error");
+    const text = input.value.trim();
+    if (!text) return;
+
+    const userMsg = { role: "user", content: text };
+    // If files are attached, use the content-array form with file references
+    const attached = uploadedFiles.filter((f) => f.attached);
+    const messages = [...chatHistory, userMsg];
+    if (attached.length > 0) {
+      // The last user message carries files in OpenAI-compat "content array"
+      const fileBlocks = attached.map((f) => ({
+        type: "file",
+        file: { file_id: f.fileId },
+      }));
+      // Push a second user message carrying only files (matches Postman example)
+      messages.push({ role: "user", content: fileBlocks });
+    }
+    chatHistory.push(userMsg);
+    input.value = "";
+    renderChatLog();
+    btn.disabled = true;
+    status.textContent = "Ждём модель…";
+    err.innerHTML = "";
+
+    try {
+      const body = {
+        model: document.getElementById("chat-model").value,
+        messages,
+        n: 1,
+      };
+      const data = await alfa("/chat", { method: "POST", body });
+      const reply = data?.choices?.[0]?.message?.content || "(пусто)";
+      chatHistory.push({ role: "assistant", content: reply });
+      renderChatLog();
+    } catch (e) {
+      err.innerHTML = `<div class="error">${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      status.textContent = "";
+    }
+  };
+
+  document.getElementById("chat-clear").onclick = () => {
+    chatHistory.length = 0;
+    renderChatLog();
+  };
 </script>
 </body>
 </html>

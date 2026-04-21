@@ -143,8 +143,22 @@ async def seed_demo_apps() -> None:
                 continue
 
             q = await session.execute(select(AppPackage).where(AppPackage.code == code))
-            if q.scalar_one_or_none() is not None:
-                continue  # already seeded
+            existing_pkg = q.scalar_one_or_none()
+
+            # Skip only if a version row with the manifest's version
+            # already exists — allows bumping the version in seed_apps
+            # to publish an upgrade.
+            manifest_version = manifest_raw.get("version")
+            if existing_pkg and manifest_version:
+                from app.models.app_package import AppPackageVersion as _V
+                vq = await session.execute(
+                    select(_V).where(
+                        _V.app_package_id == existing_pkg.id,
+                        _V.version == manifest_version,
+                    )
+                )
+                if vq.scalar_one_or_none() is not None:
+                    continue  # this exact version already seeded
 
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -159,18 +173,28 @@ async def seed_demo_apps() -> None:
                 print(f"[seed] {code} extract failed: {exc}")
                 continue
 
-            pkg = AppPackage(
-                code=extracted.manifest.code,
-                name=extracted.manifest.name,
-                description=extracted.manifest.description,
-                category=extracted.manifest.category,
-                author=extracted.manifest.author,
-                logo_path=extracted.logo_relpath,
-                is_public=True,
-                approval_status=AppApprovalStatus.APPROVED.value,
-                approved_at=datetime.now(timezone.utc),
-            )
-            session.add(pkg)
+            if existing_pkg:
+                # Upgrade path: same code, new version. Update metadata.
+                existing_pkg.name = extracted.manifest.name
+                existing_pkg.description = extracted.manifest.description
+                existing_pkg.category = extracted.manifest.category
+                existing_pkg.author = extracted.manifest.author
+                if extracted.logo_relpath:
+                    existing_pkg.logo_path = extracted.logo_relpath
+                pkg = existing_pkg
+            else:
+                pkg = AppPackage(
+                    code=extracted.manifest.code,
+                    name=extracted.manifest.name,
+                    description=extracted.manifest.description,
+                    category=extracted.manifest.category,
+                    author=extracted.manifest.author,
+                    logo_path=extracted.logo_relpath,
+                    is_public=True,
+                    approval_status=AppApprovalStatus.APPROVED.value,
+                    approved_at=datetime.now(timezone.utc),
+                )
+                session.add(pkg)
             await session.flush()
             version = AppPackageVersion(
                 app_package_id=pkg.id,

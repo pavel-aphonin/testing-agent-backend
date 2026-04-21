@@ -890,6 +890,195 @@ async def jira_create_manual(
     }
 
 
+# ── AlfaGen Sandbox proxy ────────────────────────────────────────────────────
+#
+# Iframe can't talk to AlfaGen directly — it lives on the corporate
+# network only, and we don't want the UUID token exposed to the
+# browser. These endpoints use the installation's stored settings to
+# make authenticated calls on behalf of the iframe.
+
+
+async def _alfagen_inst(
+    installation_id: UUID,
+    claims: dict,
+    session: AsyncSession,
+) -> AppInstallation:
+    inst = await session.get(AppInstallation, installation_id)
+    if inst is None or str(inst.id) != claims["inst"]:
+        raise HTTPException(403, "Installation mismatch")
+    if not inst.is_enabled:
+        raise HTTPException(400, "Приложение отключено")
+    s = inst.settings or {}
+    if not s.get("api_url") or not s.get("api_token"):
+        raise HTTPException(400, "Не заполнены api_url / api_token")
+    return inst
+
+
+def _alfagen_headers(settings: dict) -> dict[str, str]:
+    import uuid as _uuid
+    return {
+        "Authorization": f"Bearer {settings.get('api_token') or ''}",
+        "systemId": settings.get("system_id") or "sanduser",
+        "messageId": str(_uuid.uuid4()),
+    }
+
+
+@router.get("/builtins/alfagen/ping")
+async def alfagen_ping(
+    installation_id: UUID,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Connectivity + models list in one call."""
+    import httpx
+
+    inst = await _alfagen_inst(installation_id, claims, session)
+    s = inst.settings or {}
+    url = s["api_url"].rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{url}/internal/llm/v1/models",
+                headers=_alfagen_headers(s),
+            )
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code, r.text[:500])
+        data = r.json()
+        models = data.get("data") or data.get("models") or []
+        return {"ok": True, "models": models}
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"AlfaGen недоступен: {e}") from e
+
+
+@router.get("/builtins/alfagen/models")
+async def alfagen_models(
+    installation_id: UUID,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Pass-through of /internal/llm/v1/models."""
+    import httpx
+
+    inst = await _alfagen_inst(installation_id, claims, session)
+    s = inst.settings or {}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"{s['api_url'].rstrip('/')}/internal/llm/v1/models",
+            headers=_alfagen_headers(s),
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text[:500])
+    return r.json()
+
+
+class _AlfaChatReq(BaseModel):
+    model: str
+    messages: list[dict]
+    n: int = 1
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    max_completion_tokens: int | None = None
+    tools: list[dict] | None = None
+    response_format: dict | None = None
+
+
+@router.post("/builtins/alfagen/chat")
+async def alfagen_chat_proxy(
+    installation_id: UUID,
+    payload: _AlfaChatReq,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    import httpx
+
+    inst = await _alfagen_inst(installation_id, claims, session)
+    s = inst.settings or {}
+    body = payload.model_dump(exclude_none=True)
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(
+            f"{s['api_url'].rstrip('/')}/internal/llm/v1/chat/completions",
+            headers={**_alfagen_headers(s), "Content-Type": "application/json"},
+            json=body,
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text[:500])
+    return r.json()
+
+
+@router.post("/builtins/alfagen/upload")
+async def alfagen_upload(
+    installation_id: UUID,
+    file: UploadFile,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Forward a file upload to AlfaGen. Returns its task_id for polling."""
+    import httpx
+
+    inst = await _alfagen_inst(installation_id, claims, session)
+    s = inst.settings or {}
+    content = await file.read()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(
+            f"{s['api_url'].rstrip('/')}/internal/llm/v1/upload-file",
+            headers=_alfagen_headers(s),
+            files={"file": (file.filename or "upload", content)},
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text[:500])
+    data = r.json()
+    return {"task_id": data.get("taskId") or data.get("task_id"), "raw": data}
+
+
+@router.get("/builtins/alfagen/upload-status")
+async def alfagen_upload_status(
+    installation_id: UUID,
+    task_id: str,
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Subscribe to AlfaGen's SSE stream for a single poll cycle.
+
+    AlfaGen emits status frames over SSE; we read up to a short timeout
+    and return whatever we've seen. The frontend calls this repeatedly
+    until status == "COMPLETED" and file_id is set.
+    """
+    import httpx
+
+    inst = await _alfagen_inst(installation_id, claims, session)
+    s = inst.settings or {}
+    url = f"{s['api_url'].rstrip('/')}/internal/llm/v1/upload-file/{task_id}/sse"
+    last_status = "PROCESSING"
+    file_id = None
+    error = None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            async with client.stream("GET", url, headers=_alfagen_headers(s)) as resp:
+                if resp.status_code >= 400:
+                    raise HTTPException(resp.status_code, await resp.aread())
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    import json as _json
+                    try:
+                        frame = _json.loads(line[5:].strip())
+                    except _json.JSONDecodeError:
+                        continue
+                    d = frame.get("data") or {}
+                    last_status = d.get("status") or last_status
+                    if d.get("fileId"):
+                        file_id = d["fileId"]
+                    if d.get("error"):
+                        error = d["error"]
+                    if last_status in ("COMPLETED", "FAILED"):
+                        break
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"SSE недоступен: {e}") from e
+
+    return {"status": last_status, "file_id": file_id, "error": error}
+
+
 @router.get("/me/context")
 async def app_context(
     claims: Annotated[dict, Depends(require_installation_token)],

@@ -1,21 +1,26 @@
 {
   "code": "alfagen-integration",
-  "version": "1.0.0",
-  "name": "AlfaGen интеграция",
-  "description": "Отправляет найденные дефекты в AlfaGen для генерации и сохранения тест-кейсов. Позволяет вручную связать запуск с документом AlfaGen.",
+  "version": "2.0.0",
+  "name": "AlfaGen Sandbox",
+  "description": "Интеграция с корпоративным LLM-сервисом AlfaGen Sandbox. Позволяет запускать чаты с GenAI моделями (Qwen, Llama, gpt-oss), загружать документы для RAG, автоматически улучшать описания найденных дефектов и проводить анализ результатов запусков.\n\nДля работы необходим авторизационный ключ в формате UUID (выдаётся по email EYanovskaya@alfabank.ru, срок ~2 рабочих дня).\n\nДоступ к Sandbox API возможен только с IP-адресов VPN/VDI (0.2 RPS, срок 3 месяца).",
   "category": "integration",
   "author": "Alfa Bank / Markov team",
   "permissions_required": ["defects.view", "runs.view"],
   "role_required": [],
   "ui_slots": [
-    {"slot": "sidebar", "label": "AlfaGen", "icon": "RobotOutlined", "path": "frontend/index.html"}
+    {"slot": "sidebar", "label": "AlfaGen", "icon": "RobotOutlined", "path": "frontend/index.html"},
+    {"slot": "run_actions", "label": "Анализ через AlfaGen", "icon": "ThunderboltOutlined", "path": "frontend/analyze_run.html"}
   ],
   "settings_schema": [
-    {"code": "api_url", "name": "URL AlfaGen", "type": "string", "required": true, "description": "Например: https://alfagen-sandbox.alfabank.ru"},
-    {"code": "api_token", "name": "API-токен", "type": "secret", "required": true},
-    {"code": "auto_send_priorities", "name": "Автоотправка приоритетов", "type": "string", "default": "P0,P1,P2", "description": "Через запятую — какие приоритеты отправлять автоматически"}
+    {"code": "api_url", "name": "URL Sandbox API", "type": "string", "required": true, "default": "https://agenapisandbox.moscow.alfaintra.net", "description": "Базовый URL. По умолчанию — публичный Sandbox."},
+    {"code": "api_token", "name": "Авторизационный ключ (UUID)", "type": "secret", "required": true, "description": "Получается по email EYanovskaya@alfabank.ru. Формат: UUID."},
+    {"code": "system_id", "name": "systemId", "type": "string", "required": true, "default": "sanduser", "description": "Для Sandbox всегда 'sanduser'."},
+    {"code": "default_model", "name": "Модель по умолчанию", "type": "enum", "enum_values": ["Qwen/QwQ-32B", "gpt-oss-120b", "/models/llama-3.3", "Qwen/Qwen3-Coder-Next", "qwen-2.5-32b-vl", "openai/qwen3-vl-30b-a3b-thinking"], "default": "Qwen/QwQ-32B", "required": true, "description": "Какую модель использовать по умолчанию для чата и обогащения."},
+    {"code": "enable_defect_enrichment", "name": "Улучшать описания дефектов", "type": "boolean", "default": false, "description": "Если включено, при событии defect.created AlfaGen сгенерирует улучшенное описание (стандартизация, шаги, ожидаемый результат)."},
+    {"code": "enrichment_prompt", "name": "Промпт для обогащения", "type": "string", "default": "Ты — senior QA-инженер. Переформулируй описание найденного дефекта в соответствии с ГОСТ: краткий заголовок, шаги воспроизведения, ожидаемый результат, фактический результат. Используй сухой технический стиль.", "description": "Системный промпт, который даётся модели при автообогащении."},
+    {"code": "auto_enrich_priorities", "name": "Обогащать приоритеты", "type": "string", "default": "P0,P1", "description": "Через запятую — какие приоритеты дефектов обогащать автоматически."}
   ],
   "hooks": [
-    {"event": "defect.created", "handler": "builtin:alfagen.send_defect"}
+    {"event": "defect.created", "handler": "builtin:alfagen.enrich_defect"}
   ]
 }

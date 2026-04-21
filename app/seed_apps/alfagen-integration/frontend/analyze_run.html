@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Анализ запуска через AlfaGen</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 24px; background: #fafafa; }
+    h1 { color: #EE3424; margin-top: 0; font-size: 20px; }
+    .card { background: #fff; padding: 16px; border-radius: 8px; border: 1px solid #eee; margin-bottom: 12px; }
+    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; }
+    textarea, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+    textarea { min-height: 100px; resize: vertical; }
+    button { background: #EE3424; color: white; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 12px; }
+    button:disabled { opacity: 0.5; }
+    .muted { color: #999; font-size: 12px; }
+    .ok { color: #15803d; padding: 8px 12px; background: #F0FDF4; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+    .err { color: #cf1322; padding: 8px 12px; background: #FEF2F2; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+    pre { background: #f5f5f5; padding: 12px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>🤖 Анализ запуска через AlfaGen</h1>
+  <p class="muted">Запуск: <code id="run-id">—</code></p>
+
+  <div class="card">
+    <label>Модель</label>
+    <select id="model"></select>
+
+    <label>Что проанализировать</label>
+    <select id="task">
+      <option value="summary">Краткое резюме запуска</option>
+      <option value="defects">Разобрать найденные дефекты</option>
+      <option value="coverage">Оценить покрытие экранов</option>
+      <option value="custom">Свой запрос</option>
+    </select>
+
+    <label>Дополнительный промпт</label>
+    <textarea id="extra" placeholder="Необязательно. Здесь можно добавить контекст или переформулировать задачу"></textarea>
+
+    <button id="run">Запустить анализ</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <strong>Результат</strong>
+    <pre id="result">Нажмите «Запустить анализ»</pre>
+  </div>
+
+<script>
+  let token = null, apiBase = null, ctx = null, runId = null;
+
+  const PROMPTS = {
+    summary: "Краткое резюме: опиши, что удалось исследовать за запуск. Сколько экранов, какие основные пути, где агент застревал. Пиши сжато, списком.",
+    defects: "Разбор найденных дефектов. Сгруппируй по типам (UX, функциональные, перформанс), предложи для каждого приоритет и примерную причину.",
+    coverage: "Оценка покрытия: какие экраны были пройдены, что осталось не исследовано, какие пути можно добавить в сценарии.",
+    custom: "",
+  };
+
+  window.addEventListener("message", async (evt) => {
+    if (!evt.data || evt.data.type !== "markov.bootstrap") return;
+    token = evt.data.token;
+    apiBase = evt.data.apiBase ?? "";
+    runId = (evt.data.context || {}).run_id;
+    document.getElementById("run-id").textContent = runId || "не передан";
+
+    const r = await fetch(apiBase + "/api/apps/me/context", {
+      headers: { Authorization: "Bearer " + token },
+    });
+    ctx = await r.json();
+
+    // Model selector — start with default, enrich after ping
+    const sel = document.getElementById("model");
+    const def = ctx.settings?.default_model;
+    if (def) {
+      sel.innerHTML = `<option value="${def}">${def}</option>`;
+    }
+    try {
+      const data = await alfa("/ping");
+      if (data.models) {
+        sel.innerHTML = data.models.map((m) =>
+          `<option value="${m.id || m}" ${ (m.id || m) === def ? "selected" : ""}>${m.id || m}</option>`
+        ).join("");
+      }
+    } catch (_e) {}
+  });
+  window.parent.postMessage({ type: "markov.ready" }, "*");
+
+  async function alfa(path, opts = {}) {
+    const url = `${apiBase}/api/apps/builtins/alfagen${path}`;
+    const params = new URLSearchParams({ installation_id: ctx.installation_id, ...(opts.params || {}) });
+    const fetchOpts = {
+      method: opts.method || "GET",
+      headers: { Authorization: "Bearer " + token, ...(opts.body ? { "Content-Type": "application/json" } : {}) },
+    };
+    if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
+    const resp = await fetch(`${url}?${params}`, fetchOpts);
+    const data = resp.status === 204 ? null : await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || resp.statusText);
+    return data;
+  }
+
+  document.getElementById("run").onclick = async () => {
+    const btn = document.getElementById("run");
+    const status = document.getElementById("status");
+    const result = document.getElementById("result");
+    btn.disabled = true;
+    status.innerHTML = "";
+    result.textContent = "Собираем данные запуска…";
+
+    try {
+      if (!runId) throw new Error("run_id не передан");
+
+      // 1. Pull run results via Markov API
+      const runResp = await fetch(apiBase + "/api/runs/" + runId + "/results", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!runResp.ok) throw new Error("Не удалось получить данные запуска");
+      const runData = await runResp.json();
+
+      const screens = runData.screens || [];
+      const edges = runData.edges || [];
+      const context = `
+Запуск ${runData.run?.title || runId}:
+- Найдено экранов: ${screens.length}
+- Выполнено переходов: ${edges.length}
+- Режим: ${runData.run?.mode}
+- Статус: ${runData.run?.status}
+
+Экраны:
+${screens.slice(0, 30).map((s) => `  - ${s.name} (посещений: ${s.visit_count})`).join("\n")}
+
+Переходы (первые 30):
+${edges.slice(0, 30).map((e) => `  - ${e.action_type}${e.action_details_json?.element ? " «" + e.action_details_json.element + "»" : ""}`).join("\n")}
+`.trim();
+
+      const taskKind = document.getElementById("task").value;
+      const extra = document.getElementById("extra").value.trim();
+      const sysPrompt = "Ты — QA-аналитик. Анализируй результаты исследования мобильного приложения агентом-тестировщиком. Отвечай на русском, структурировано.";
+      const userPrompt = [
+        context,
+        "",
+        taskKind !== "custom" ? PROMPTS[taskKind] : "",
+        extra,
+      ].filter(Boolean).join("\n\n");
+
+      result.textContent = "Ждём модель…";
+      const chat = await alfa("/chat", {
+        method: "POST",
+        body: {
+          model: document.getElementById("model").value,
+          messages: [
+            { role: "system", content: sysPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          n: 1,
+        },
+      });
+      const reply = chat?.choices?.[0]?.message?.content || "(пустой ответ)";
+      result.textContent = reply;
+      status.innerHTML = `<div class="ok">✓ Готово</div>`;
+    } catch (e) {
+      result.textContent = "";
+      status.innerHTML = `<div class="err">${e.message}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+</script>
+</body>
+</html>

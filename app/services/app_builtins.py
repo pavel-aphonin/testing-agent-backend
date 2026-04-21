@@ -120,52 +120,140 @@ def _build_description(payload: dict) -> str:
     return "\n".join(parts)
 
 
-# ── AlfaGen ──────────────────────────────────────────────────────────────────
+# ── AlfaGen Sandbox ──────────────────────────────────────────────────────────
+#
+# AlfaGen Sandbox is a corporate OpenAI-compatible LLM service. We proxy
+# chat completions, file upload, and tokenization through our backend so
+# the installation's token never leaves the server.
+#
+# Headers required on every request:
+#   Authorization: Bearer <uuid-token>
+#   systemId:      sanduser
+#   messageId:     <uuid per request>
+#
+# Base paths:
+#   GET  /internal/llm/v1/models
+#   POST /internal/llm/v1/chat/completions
+#   POST /internal/llm/v1/upload-file
+#   GET  /internal/llm/v1/upload-file/{taskId}/sse  (SSE)
+#   POST /internal/v1/tokenizer/tokens/count
+#
+# ─────────────────────────────────────────────────────────────────────────────
 
-async def alfagen_send_defect(installation: AppInstallation, payload: dict) -> None:
-    """Push a defect to AlfaGen sandbox via its REST API.
 
-    The actual AlfaGen endpoint contract will be filled in once we have
-    the concrete API reference. This stub implements the configured
-    POST to ``api_url`` with a bearer token.
-    """
-    s = installation.settings or {}
-    url = (s.get("api_url") or "").rstrip("/")
-    token = s.get("api_token")
-    if not url or not token:
-        logger.info("AlfaGen integration for %s not fully configured; skipping", installation.id)
-        return
+def _alfagen_headers(settings: dict) -> dict[str, str]:
+    import uuid as _uuid
+    return {
+        "Authorization": f"Bearer {settings.get('api_token') or ''}",
+        "systemId": settings.get("system_id") or "sanduser",
+        "messageId": str(_uuid.uuid4()),
+    }
+
+
+async def alfagen_chat(
+    settings: dict,
+    *,
+    messages: list[dict],
+    model: str | None = None,
+    **extra,
+) -> dict:
+    """Thin wrapper around /internal/llm/v1/chat/completions. Returns
+    the parsed JSON response unchanged."""
+    url = (settings.get("api_url") or "").rstrip("/")
+    if not url or not settings.get("api_token"):
+        raise RuntimeError("AlfaGen: не заполнены api_url / api_token")
 
     body = {
-        "source": "markov",
-        "defect_id": payload.get("defect_id"),
-        "run_id": payload.get("run_id"),
-        "priority": payload.get("priority"),
-        "title": payload.get("title"),
-        "description": payload.get("description"),
-        "screen": payload.get("screen_name"),
+        "model": model or settings.get("default_model") or "Qwen/QwQ-32B",
+        "messages": messages,
+        "n": 1,
     }
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            f"{url}/api/v1/defects",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
+    body.update(extra)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(
+            f"{url}/internal/llm/v1/chat/completions",
+            headers={**_alfagen_headers(settings), "Content-Type": "application/json"},
             json=body,
         )
-    if resp.status_code >= 400:
-        logger.warning(
-            "AlfaGen push failed for installation %s: %s %s",
-            installation.id, resp.status_code, resp.text[:500],
+    if r.status_code >= 400:
+        raise RuntimeError(f"AlfaGen {r.status_code}: {r.text[:500]}")
+    return r.json()
+
+
+async def alfagen_enrich_defect(installation: AppInstallation, payload: dict) -> None:
+    """On defect.created, ask AlfaGen to rewrite the description to a
+    QA standard (steps / expected / actual). Writes the result to the
+    defect's ``llm_analysis_json.alfagen_enriched`` field.
+
+    Gated by the ``enable_defect_enrichment`` setting and the
+    ``auto_enrich_priorities`` list.
+    """
+    s = installation.settings or {}
+    if not s.get("enable_defect_enrichment"):
+        return
+
+    wanted = [p.strip() for p in (s.get("auto_enrich_priorities") or "").split(",") if p.strip()]
+    if wanted and payload.get("priority") not in wanted:
+        return
+
+    system_prompt = s.get("enrichment_prompt") or (
+        "Ты — senior QA-инженер. Переформулируй описание найденного дефекта "
+        "в соответствии с ГОСТ: краткий заголовок, шаги воспроизведения, "
+        "ожидаемый результат, фактический результат."
+    )
+    user_prompt = (
+        f"Экран: {payload.get('screen_name') or '—'}\n"
+        f"Приоритет: {payload.get('priority')}\n"
+        f"Тип: {payload.get('kind') or '—'}\n"
+        f"Исходный заголовок: {payload.get('title') or '—'}\n"
+        f"Исходное описание:\n{payload.get('description') or '—'}"
+    )
+
+    try:
+        resp = await alfagen_chat(
+            s,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
         )
+        enriched = (resp.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AlfaGen enrichment failed for %s: %s", payload.get("defect_id"), exc)
+        return
+
+    # Persist to the defect row
+    from uuid import UUID as _UUID
+
+    from app.db import async_session_maker
+    from app.models.defect import DefectModel
+
+    try:
+        async with async_session_maker() as session:
+            defect = await session.get(DefectModel, _UUID(str(payload.get("defect_id"))))
+            if defect is None:
+                return
+            data = dict(defect.llm_analysis_json or {})
+            data["alfagen_enriched"] = {
+                "text": enriched,
+                "model": s.get("default_model"),
+                "enriched_at_installation": str(installation.id),
+            }
+            defect.llm_analysis_json = data
+            await session.commit()
+            logger.info(
+                "AlfaGen enriched defect %s (%d chars)",
+                payload.get("defect_id"), len(enriched),
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("Writing AlfaGen enrichment to DB failed")
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 BUILTINS: dict[str, HandlerFn] = {
     "jira.create_issue": jira_create_issue,
-    "alfagen.send_defect": alfagen_send_defect,
+    "alfagen.enrich_defect": alfagen_enrich_defect,
 }
 
 
