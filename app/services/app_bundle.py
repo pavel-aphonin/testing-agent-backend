@@ -119,6 +119,16 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
                     ManifestScreenshot(path=p) for p in sorted(screenshots)
                 ]
 
+            # Fall back to CHANGELOG.md for release notes if manifest
+            # didn't specify them inline.
+            if not manifest_obj.changelog:
+                cl_path = target_dir / "CHANGELOG.md"
+                if cl_path.exists():
+                    try:
+                        manifest_obj.changelog = cl_path.read_text(encoding="utf-8")[:4000]
+                    except OSError:
+                        pass
+
             # Sanity: manifest references must exist
             for slot in manifest_obj.ui_slots:
                 if not (target_dir / "frontend" / slot.path).exists() \

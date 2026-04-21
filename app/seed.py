@@ -202,6 +202,7 @@ async def seed_demo_apps() -> None:
                 manifest=extracted.manifest.model_dump(),
                 bundle_path=extracted.bundle_relpath,
                 size_bytes=extracted.size_bytes,
+                changelog=extracted.manifest.changelog,
             )
             session.add(version)
             await session.commit()

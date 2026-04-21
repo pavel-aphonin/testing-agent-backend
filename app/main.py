@@ -6,8 +6,11 @@ from contextlib import asynccontextmanager
 
 from alembic import command
 from alembic.config import Config
+from pathlib import Path as _Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api import admin_users as admin_users_api
 from app.api import assistant as assistant_api
@@ -36,6 +39,7 @@ from app.api import notification_types as notif_types_api
 from app.api import reference as reference_api
 from app.api import apps as apps_api
 from app.auth.users import auth_backend, fastapi_users
+from app.config import settings
 from app.db import engine
 from app.models import (  # noqa: F401  registers all tables on Base.metadata
     AgentSettings,
@@ -212,5 +216,18 @@ app.include_router(reference_api.router)
 app.include_router(reference_api.prefs_router)
 app.include_router(apps_api.router)
 app.include_router(apps_api.ws_apps_router)
+
+# Static file serving for app bundles. Bundle content is public by
+# design — it's HTML/JS/CSS designed to run in a sandboxed iframe, no
+# different from a Chrome extension's packaged code. The installation
+# token (issued to authenticated users only) is what gates API calls,
+# not the bundle asset URL itself.
+_bundles_root = _Path(settings.app_uploads_dir) / "app-bundles"
+_bundles_root.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/app-bundles",
+    StaticFiles(directory=str(_bundles_root), html=True),
+    name="app-bundles",
+)
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)

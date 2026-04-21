@@ -80,6 +80,10 @@ class AppManifest(BaseModel):
     settings_schema: list[ManifestSettingField] = Field(default_factory=list)
     hooks: list[ManifestHook] = Field(default_factory=list)
     screenshots: list[ManifestScreenshot] = Field(default_factory=list)
+    # Optional free-form release notes for THIS version. Shown in the
+    # detail page's version list. If absent the extractor tries to read
+    # CHANGELOG.md from the bundle root.
+    changelog: str | None = None
 
 
 # ── API schemas ──────────────────────────────────────────────────────────────

@@ -335,6 +335,7 @@ async def upload_bundle(
         manifest=manifest.model_dump(),
         bundle_path=extracted.bundle_relpath,
         size_bytes=extracted.size_bytes,
+        changelog=manifest.changelog,
     )
     session.add(version)
 
