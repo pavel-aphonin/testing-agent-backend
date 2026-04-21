@@ -1,0 +1,21 @@
+{
+  "code": "hello-world",
+  "version": "1.0.0",
+  "name": "Hello World",
+  "description": "Эталонное приложение-пример. Показывает, как встроиться в сайдбар и обратиться к API Маркова через выданный installation-токен.",
+  "category": "utility",
+  "author": "Alfa Bank / Markov team",
+  "permissions_required": ["runs.view", "defects.view"],
+  "role_required": [],
+  "ui_slots": [
+    {"slot": "sidebar", "label": "Hello World", "icon": "SmileOutlined", "path": "frontend/index.html"},
+    {"slot": "corner", "label": "Hello", "icon": "SmileOutlined", "path": "frontend/index.html"}
+  ],
+  "settings_schema": [
+    {"code": "greeting", "name": "Приветствие", "type": "string", "default": "Привет, мир!", "description": "Текст, который покажет приложение"},
+    {"code": "webhook_url", "name": "Webhook URL (для hook defect.created)", "type": "string", "required": false, "description": "Куда POSTить события. Оставьте пустым чтобы отключить."}
+  ],
+  "hooks": [
+    {"event": "defect.created", "handler": "logic.on_defect:handle"}
+  ]
+}

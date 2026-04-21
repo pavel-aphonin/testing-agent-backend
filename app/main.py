@@ -68,7 +68,7 @@ from app.models import (  # noqa: F401  registers all tables on Base.metadata
     User,
 )
 from app.schemas.user import UserRead, UserUpdate
-from app.seed import seed_initial_admin, seed_initial_models
+from app.seed import seed_demo_apps, seed_initial_admin, seed_initial_models
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ async def lifespan(app: FastAPI):
 
     await seed_initial_admin()
     await seed_initial_models()
+    await seed_demo_apps()
     yield
     await engine.dispose()
 

@@ -60,6 +60,7 @@ from app.schemas.app_package import (
     AppReviewUpsert,
 )
 from app.services.app_bundle import BundleError, extract_and_validate
+from app.services.app_token import issue_installation_token, require_installation_token
 
 router = APIRouter(prefix="/api/apps", tags=["apps"])
 ws_apps_router = APIRouter(prefix="/api/workspaces", tags=["workspace-apps"])
@@ -711,6 +712,82 @@ async def update_installation(
         "updated_at": inst.updated_at,
         "package": await _enrich_package(pkg, session) if pkg else None,
         "version": None,
+    }
+
+
+class _TokenResponse(BaseModel):
+    token: str
+    expires_at: datetime
+    installation_id: UUID
+    workspace_id: UUID
+    permissions: list[str]
+
+
+@ws_apps_router.post("/{ws_id}/apps/{inst_id}/token", response_model=_TokenResponse)
+async def get_installation_token(
+    ws_id: UUID,
+    inst_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Issue a short-lived token the UI can hand to the app's iframe.
+
+    Scoped to the triple (workspace, installation, user). Grants the
+    intersection of user.permissions and the manifest's declared
+    permissions_required (so even a privileged user can't escalate
+    an app's scope by asking for more).
+    """
+    await _require_ws_member(ws_id, user, session)
+
+    inst = await session.get(AppInstallation, inst_id)
+    if inst is None or inst.workspace_id != ws_id:
+        raise HTTPException(404, "Installation not found")
+    if not inst.is_enabled:
+        raise HTTPException(400, "Приложение отключено")
+    ver = await session.get(AppPackageVersion, inst.version_id)
+    if ver is None:
+        raise HTTPException(500, "Version row missing")
+
+    required = set((ver.manifest or {}).get("permissions_required") or [])
+    user_perms = set(user.permissions or [])
+    granted = sorted(required & user_perms) if required else []
+
+    token, exp = issue_installation_token(
+        user_id=user.id,
+        workspace_id=ws_id,
+        installation_id=inst_id,
+        granted_permissions=granted,
+    )
+    return {
+        "token": token,
+        "expires_at": exp,
+        "installation_id": inst_id,
+        "workspace_id": ws_id,
+        "permissions": granted,
+    }
+
+
+@router.get("/me/context")
+async def app_context(
+    claims: Annotated[dict, Depends(require_installation_token)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """What the iframe calls on startup to discover who it is.
+
+    Returns the user_id, workspace_id, installation_id, current settings
+    and granted permissions so the app can render its UI without
+    knowing Markov's internals.
+    """
+    inst_id = UUID(claims["inst"])
+    inst = await session.get(AppInstallation, inst_id)
+    if inst is None:
+        raise HTTPException(404, "Installation not found")
+    return {
+        "user_id": claims["sub"],
+        "workspace_id": claims["wsid"],
+        "installation_id": claims["inst"],
+        "permissions": claims.get("perms", []),
+        "settings": inst.settings or {},
     }
 
 

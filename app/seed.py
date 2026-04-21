@@ -108,6 +108,71 @@ async def seed_initial_admin() -> None:
             print(f"[seed] Admin {settings.initial_admin_email} already exists.")
 
 
+async def seed_demo_apps() -> None:
+    """Pack and register the 'hello-world' demo bundle as an approved
+    public app. Idempotent — skipped if the code already exists."""
+    import io
+    import zipfile
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from app.models.app_package import (
+        AppApprovalStatus,
+        AppPackage,
+        AppPackageVersion,
+    )
+    from app.services.app_bundle import extract_and_validate
+
+    seed_dir = Path(__file__).parent / "seed_apps" / "hello-world"
+    if not (seed_dir / "manifest.json").exists():
+        return
+
+    async with async_session_maker() as session:
+        # Already seeded?
+        q = await session.execute(select(AppPackage).where(AppPackage.code == "hello-world"))
+        if q.scalar_one_or_none() is not None:
+            print("[seed] Hello World app already present.")
+            return
+
+        # Build ZIP in memory
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in seed_dir.rglob("*"):
+                if path.is_file():
+                    zf.write(path, path.relative_to(seed_dir).as_posix())
+        zip_bytes = buf.getvalue()
+
+        try:
+            extracted = extract_and_validate(zip_bytes)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[seed] Hello World extract failed: {exc}")
+            return
+
+        pkg = AppPackage(
+            code=extracted.manifest.code,
+            name=extracted.manifest.name,
+            description=extracted.manifest.description,
+            category=extracted.manifest.category,
+            author=extracted.manifest.author,
+            logo_path=extracted.logo_relpath,
+            is_public=True,
+            approval_status=AppApprovalStatus.APPROVED.value,
+            approved_at=datetime.now(timezone.utc),
+        )
+        session.add(pkg)
+        await session.flush()
+        version = AppPackageVersion(
+            app_package_id=pkg.id,
+            version=extracted.manifest.version,
+            manifest=extracted.manifest.model_dump(),
+            bundle_path=extracted.bundle_relpath,
+            size_bytes=extracted.size_bytes,
+        )
+        session.add(version)
+        await session.commit()
+        print(f"[seed] Registered demo app: {pkg.name} v{version.version}")
+
+
 async def seed_initial_models() -> None:
     """Insert the two pre-installed LLM models if they're not in the table yet."""
     inserted_any = False
