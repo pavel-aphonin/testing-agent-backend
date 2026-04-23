@@ -13,6 +13,8 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
     role_name: str = ""
     role_code: str = ""
     permissions: list[str] = []
+    # Relative path to uploaded avatar. None = frontend renders default circle.
+    avatar_path: str | None = None
 
 
 class UserCreate(schemas.BaseUserCreate):

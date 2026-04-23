@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" width="480" height="320">
+  <rect width="480" height="320" fill="#fafafa"/>
+  <rect x="0" y="0" width="480" height="36" fill="#fff" stroke="#eee"/>
+  <circle cx="14" cy="18" r="5" fill="#ff5f57"/>
+  <circle cx="30" cy="18" r="5" fill="#febc2e"/>
+  <circle cx="46" cy="18" r="5" fill="#28c840"/>
+  <text x="240" y="22" text-anchor="middle" font-family="-apple-system,Inter" font-size="12" fill="#888">AlfaGen · Загрузка документов (RAG)</text>
+
+  <!-- dropzone -->
+  <rect x="40" y="60" width="400" height="100" rx="12" fill="#fff" stroke="#EE3424" stroke-dasharray="6,6" stroke-width="2"/>
+  <text x="240" y="100" text-anchor="middle" font-family="-apple-system,Inter" font-size="14" fill="#EE3424" font-weight="600">Перетащите сюда PDF, DOCX или TXT</text>
+  <text x="240" y="122" text-anchor="middle" font-family="-apple-system,Inter" font-size="11" fill="#999">или нажмите, чтобы выбрать файл · до 20 МБ</text>
+
+  <!-- progress rows -->
+  <rect x="40" y="180" width="400" height="40" rx="6" fill="#fff" stroke="#eee"/>
+  <text x="56" y="204" font-family="-apple-system,Inter" font-size="12" fill="#333">spec_v2.pdf</text>
+  <rect x="56" y="210" width="340" height="4" rx="2" fill="#eee"/>
+  <rect x="56" y="210" width="340" height="4" rx="2" fill="#28c840"/>
+  <text x="420" y="204" font-family="-apple-system,Inter" font-size="11" fill="#28c840">100%</text>
+
+  <rect x="40" y="228" width="400" height="40" rx="6" fill="#fff" stroke="#eee"/>
+  <text x="56" y="252" font-family="-apple-system,Inter" font-size="12" fill="#333">acceptance_criteria.docx</text>
+  <rect x="56" y="258" width="340" height="4" rx="2" fill="#eee"/>
+  <rect x="56" y="258" width="230" height="4" rx="2" fill="#EE3424"/>
+  <text x="420" y="252" font-family="-apple-system,Inter" font-size="11" fill="#EE3424">68%</text>
+
+  <rect x="40" y="276" width="400" height="36" rx="6" fill="#fff3f3" stroke="#EE3424"/>
+  <text x="56" y="298" font-family="-apple-system,Inter" font-size="12" fill="#EE3424">📎 2 файла прикреплено — будут использованы в следующем сообщении</text>
+</svg>

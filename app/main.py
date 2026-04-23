@@ -38,6 +38,9 @@ from app.api import custom_dictionaries as custom_dicts_api
 from app.api import notification_types as notif_types_api
 from app.api import reference as reference_api
 from app.api import apps as apps_api
+from app.api import branding as branding_api
+from app.api import help as help_api
+from app.api import release_notes as release_notes_api
 from app.auth.users import auth_backend, fastapi_users
 from app.config import settings
 from app.db import engine
@@ -72,7 +75,13 @@ from app.models import (  # noqa: F401  registers all tables on Base.metadata
     User,
 )
 from app.schemas.user import UserRead, UserUpdate
-from app.seed import seed_demo_apps, seed_initial_admin, seed_initial_models
+from app.seed import (
+    seed_demo_apps,
+    seed_help_articles,
+    seed_initial_admin,
+    seed_initial_models,
+    seed_release_notes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +112,8 @@ async def lifespan(app: FastAPI):
     await seed_initial_admin()
     await seed_initial_models()
     await seed_demo_apps()
+    await seed_help_articles()
+    await seed_release_notes()
     yield
     await engine.dispose()
 
@@ -216,6 +227,10 @@ app.include_router(reference_api.router)
 app.include_router(reference_api.prefs_router)
 app.include_router(apps_api.router)
 app.include_router(apps_api.ws_apps_router)
+app.include_router(help_api.router)
+app.include_router(branding_api.router)
+app.include_router(release_notes_api.router)
+app.include_router(release_notes_api.admin_router)
 
 # Static file serving for app bundles. Bundle content is public by
 # design — it's HTML/JS/CSS designed to run in a sandboxed iframe, no
@@ -228,6 +243,26 @@ app.mount(
     "/app-bundles",
     StaticFiles(directory=str(_bundles_root), html=True),
     name="app-bundles",
+)
+
+# Branding assets (product logo uploads). Public like /app-bundles —
+# images aren't secrets, and the login page needs them before auth.
+_branding_root = _Path(settings.app_uploads_dir) / "branding"
+_branding_root.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/branding-assets",
+    StaticFiles(directory=str(_branding_root)),
+    name="branding-assets",
+)
+
+# User avatars. Also public — same rationale (images, not data) and
+# every member in the workspace sees each other's avatars anyway.
+_avatars_root = _Path(settings.app_uploads_dir) / "avatars"
+_avatars_root.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/avatar-assets",
+    StaticFiles(directory=str(_avatars_root)),
+    name="avatar-assets",
 )
 app.include_router(run_ws_api.router)
 app.include_router(download_ws_api.router)

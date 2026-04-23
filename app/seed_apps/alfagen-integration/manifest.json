@@ -1,7 +1,7 @@
 {
   "code": "alfagen-integration",
-  "version": "2.0.1",
-  "changelog": "## v2.0.1 — Фикс бандлов и логотипа\n\n- Логотип теперь корректно отображается на странице магазина и в детальном просмотре\n- Iframe приложения грузится без авторизации (через статический mount `/app-bundles/`) — до этого был `401 Unauthorized`\n- В списке версий показывается changelog для каждой\n\n## v2.0.0 — Полноценный клиент Sandbox API\n\n- Переход на реальный AlfaGen Sandbox API (v1 была заглушкой с POST дефектов)\n- Проксирование токена через backend — iframe не видит секретов\n- Чат с выбором модели из 6 доступных (Qwen/QwQ-32B, gpt-oss-120b, llama-3.3, Qwen3-Coder-Next и 2 vision-модели)\n- Загрузка документов (PDF/DOCX/TXT) с прогресс-баром через SSE\n- RAG: прикрепление загруженных файлов к сообщениям чата\n- Слот run_actions: страница «Анализ запуска» на результатах исследования\n- Автообогащение описаний дефектов P0/P1 настраиваемым промптом\n- Логотип AlfaGen\n\n## v1.0.0 — Стаб\n\n- Заглушка с простым POST дефектов (устарела)",
+  "version": "2.0.4",
+  "changelog": "**Полная версия интерфейса.**\n\n- Переделали UI приложения: вместо набора заглушечных форм — полноценный клиент Sandbox API (чат, загрузка файлов, история сообщений, переключение модели)\n- Добавили подсказки по знаку `?` в настройках — для пользователей с разным опытом\n- Сгруппировали настройки: «Подключение», «Поведение», «Автообогащение»\n- Фикс: чекбокс «Скрыть из бокового меню» теперь действительно скрывает",
   "name": "AlfaGen Sandbox",
   "description": "Интеграция с корпоративным LLM-сервисом AlfaGen Sandbox. Позволяет запускать чаты с GenAI моделями (Qwen, Llama, gpt-oss), загружать документы для RAG, автоматически улучшать описания найденных дефектов и проводить анализ результатов запусков.\n\nДля работы необходим авторизационный ключ в формате UUID (выдаётся по email EYanovskaya@alfabank.ru, срок ~2 рабочих дня).\n\nДоступ к Sandbox API возможен только с IP-адресов VPN/VDI (0.2 RPS, срок 3 месяца).",
   "category": "integration",
@@ -13,13 +13,13 @@
     {"slot": "run_actions", "label": "Анализ через AlfaGen", "icon": "ThunderboltOutlined", "path": "frontend/analyze_run.html"}
   ],
   "settings_schema": [
-    {"code": "api_url", "name": "URL Sandbox API", "type": "string", "required": true, "default": "https://agenapisandbox.moscow.alfaintra.net", "description": "Базовый URL. По умолчанию — публичный Sandbox."},
-    {"code": "api_token", "name": "Авторизационный ключ (UUID)", "type": "secret", "required": true, "description": "Получается по email EYanovskaya@alfabank.ru. Формат: UUID."},
-    {"code": "system_id", "name": "systemId", "type": "string", "required": true, "default": "sanduser", "description": "Для Sandbox всегда 'sanduser'."},
-    {"code": "default_model", "name": "Модель по умолчанию", "type": "enum", "enum_values": ["Qwen/QwQ-32B", "gpt-oss-120b", "/models/llama-3.3", "Qwen/Qwen3-Coder-Next", "qwen-2.5-32b-vl", "openai/qwen3-vl-30b-a3b-thinking"], "default": "Qwen/QwQ-32B", "required": true, "description": "Какую модель использовать по умолчанию для чата и обогащения."},
-    {"code": "enable_defect_enrichment", "name": "Улучшать описания дефектов", "type": "boolean", "default": false, "description": "Если включено, при событии defect.created AlfaGen сгенерирует улучшенное описание (стандартизация, шаги, ожидаемый результат)."},
-    {"code": "enrichment_prompt", "name": "Промпт для обогащения", "type": "string", "default": "Ты — senior QA-инженер. Переформулируй описание найденного дефекта в соответствии с ГОСТ: краткий заголовок, шаги воспроизведения, ожидаемый результат, фактический результат. Используй сухой технический стиль.", "description": "Системный промпт, который даётся модели при автообогащении."},
-    {"code": "auto_enrich_priorities", "name": "Обогащать приоритеты", "type": "string", "default": "P0,P1", "description": "Через запятую — какие приоритеты дефектов обогащать автоматически."}
+    {"code": "api_url", "name": "Адрес сервера", "type": "string", "required": true, "default": "https://agenapisandbox.moscow.alfaintra.net", "group": "Подключение", "description": "Куда отправлять запросы. По умолчанию — публичная песочница AlfaGen."},
+    {"code": "api_token", "name": "Ключ доступа", "type": "secret", "required": true, "group": "Подключение", "description": "Личный ключ в формате UUID. Запрашивается у EYanovskaya@alfabank.ru, выдают за 1–2 рабочих дня."},
+    {"code": "system_id", "name": "Идентификатор системы", "type": "string", "required": true, "default": "sanduser", "group": "Подключение", "description": "Для песочницы всегда sanduser. В проде подскажет администратор."},
+    {"code": "default_model", "name": "Модель по умолчанию", "type": "enum", "enum_values": ["Qwen/QwQ-32B", "gpt-oss-120b", "/models/llama-3.3", "Qwen/Qwen3-Coder-Next", "qwen-2.5-32b-vl", "openai/qwen3-vl-30b-a3b-thinking"], "default": "Qwen/QwQ-32B", "required": true, "group": "Поведение", "description": "Какую модель использовать, если пользователь не выбрал явно."},
+    {"code": "enable_defect_enrichment", "name": "Улучшать описания дефектов", "type": "boolean", "default": false, "group": "Автообогащение", "description": "Когда агент находит дефект — AlfaGen автоматически переоформит описание: заголовок, шаги, ожидаемый и фактический результат."},
+    {"code": "enrichment_prompt", "name": "Инструкция для AlfaGen", "type": "text", "default": "Ты — senior QA-инженер. Переформулируй описание найденного дефекта в соответствии с ГОСТ: краткий заголовок, шаги воспроизведения, ожидаемый результат, фактический результат. Используй сухой технический стиль.", "group": "Автообогащение", "description": "Текст-инструкция, который получает модель. Можно писать на русском, поддерживаются многострочные инструкции."},
+    {"code": "auto_enrich_priorities", "name": "Только эти приоритеты", "type": "string", "default": "P0,P1", "group": "Автообогащение", "description": "Через запятую — какие дефекты улучшать. Например P0,P1 значит «только критичные и высокие»."}
   ],
   "hooks": [
     {"event": "defect.created", "handler": "builtin:alfagen.enrich_defect"}

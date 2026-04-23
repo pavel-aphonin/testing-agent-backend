@@ -63,6 +63,9 @@ class AppPackage(Base):
     author: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Path (under app_uploads_dir) to the logo of the *latest* approved version.
     logo_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Wide hero-banner image, rendered at the top of the detail page.
+    # Shipped in the bundle as cover.{png,jpg,jpeg,webp}.
+    cover_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Public = searchable in the store by anyone.
     # Private = visible only to members of owner_workspace_id.
@@ -207,4 +210,40 @@ class AppReview(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), onupdate=func.now(), nullable=True
+    )
+
+
+class AppInstallationUserPref(Base):
+    """Per-user, per-installation UI toggles.
+
+    Example prefs (JSONB):
+      { "hidden_from_sidebar": true, "hidden_from_top_bar": false }
+
+    The sidebar renderer reads this; if not found, defaults to showing
+    all slots (previous behavior).
+    """
+
+    __tablename__ = "app_installation_user_prefs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "installation_id", name="uq_inst_user_prefs"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    installation_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("app_installations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    prefs: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

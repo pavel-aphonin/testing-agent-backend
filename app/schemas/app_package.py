@@ -34,11 +34,23 @@ class ManifestSlot(BaseModel):
 class ManifestSettingField(BaseModel):
     code: str
     name: str
-    type: Literal["string", "number", "boolean", "secret", "enum"] = "string"
+    # "string"  → single-line Input
+    # "text"    → multi-line Input.TextArea (used for prompts, long descriptions)
+    # "secret"  → Input.Password (never returned by /installations read)
+    # "enum"    → Select with enum_values
+    type: Literal["string", "text", "number", "boolean", "secret", "enum"] = "string"
     enum_values: list[str] | None = None
     required: bool = False
     default: Any | None = None
+    # Short human-readable label for the "?" tooltip next to the field
+    # name. Keep it simple — the whole point is that beginner users
+    # should be able to read it and know what to do.
     description: str | None = None
+    # Optional section for visual grouping on the install drawer.
+    # Fields without a group render at the top, grouped fields render
+    # under collapsible sections. Keeps the form scannable when an app
+    # has more than a handful of settings.
+    group: str | None = None
 
 
 class ManifestHook(BaseModel):
@@ -98,6 +110,7 @@ class AppPackageRead(BaseModel):
     category: str
     author: str | None
     logo_path: str | None
+    cover_path: str | None = None
     is_public: bool
     owner_workspace_id: uuid.UUID | None
     approval_status: str
@@ -142,6 +155,22 @@ class AppInstallationRead(BaseModel):
     # Enriched fields
     package: AppPackageRead | None = None
     version: AppPackageVersionRead | None = None
+    # Current user's per-installation UI prefs (free-form JSONB).
+    # Known keys today: "hidden_from_sidebar" (bool), "hidden_from_top_bar" (bool).
+    # Missing keys = show by default. Only populated on the endpoint that
+    # reads installations for the current user.
+    user_prefs: dict = {}
+
+
+class AppInstallationUserPrefsUpdate(BaseModel):
+    """Replace the current user's prefs for one installation.
+
+    We do a full replace (not a partial merge) so the client is in
+    full control of the object — simpler to reason about than PATCH
+    semantics over JSONB.
+    """
+
+    prefs: dict
 
 
 class AppInstallRequest(BaseModel):

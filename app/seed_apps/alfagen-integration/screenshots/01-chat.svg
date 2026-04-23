@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" width="480" height="320">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff3f3"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="320" fill="url(#bg)"/>
+  <!-- window chrome -->
+  <rect x="0" y="0" width="480" height="36" fill="#fafafa" stroke="#eee"/>
+  <circle cx="14" cy="18" r="5" fill="#ff5f57"/>
+  <circle cx="30" cy="18" r="5" fill="#febc2e"/>
+  <circle cx="46" cy="18" r="5" fill="#28c840"/>
+  <text x="240" y="22" text-anchor="middle" font-family="-apple-system,Inter,Helvetica" font-size="12" fill="#888">AlfaGen · Чат</text>
+  <!-- messages -->
+  <rect x="20" y="58" width="280" height="28" rx="14" fill="#f3f3f5"/>
+  <text x="36" y="76" font-family="-apple-system,Inter" font-size="12" fill="#333">Как оформить заявку на доступ к Sandbox?</text>
+  <rect x="130" y="98" width="330" height="64" rx="10" fill="#EE3424"/>
+  <text x="146" y="118" font-family="-apple-system,Inter" font-size="12" fill="#fff">1. Напишите на EYanovskaya@alfabank.ru</text>
+  <text x="146" y="136" font-family="-apple-system,Inter" font-size="12" fill="#fff">2. Укажите ФИО, email, цель использования</text>
+  <text x="146" y="154" font-family="-apple-system,Inter" font-size="12" fill="#fff">3. Срок выдачи — 2 рабочих дня</text>
+  <rect x="20" y="176" width="320" height="28" rx="14" fill="#f3f3f5"/>
+  <text x="36" y="194" font-family="-apple-system,Inter" font-size="12" fill="#333">А какую модель использовать для VL-задач?</text>
+  <rect x="130" y="216" width="330" height="48" rx="10" fill="#EE3424"/>
+  <text x="146" y="236" font-family="-apple-system,Inter" font-size="12" fill="#fff">qwen-2.5-32b-vl — общие визуальные задачи</text>
+  <text x="146" y="254" font-family="-apple-system,Inter" font-size="12" fill="#fff">qwen3-vl-30b-a3b-thinking — с рассуждениями</text>
+  <!-- input -->
+  <rect x="20" y="280" width="440" height="28" rx="14" fill="#fff" stroke="#ddd"/>
+  <text x="34" y="298" font-family="-apple-system,Inter" font-size="12" fill="#bbb">Введите сообщение…</text>
+  <circle cx="444" cy="294" r="10" fill="#EE3424"/>
+  <path d="M 440 294 L 448 290 L 448 298 Z" fill="#fff"/>
+</svg>

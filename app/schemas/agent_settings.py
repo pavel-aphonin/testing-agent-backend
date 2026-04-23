@@ -26,6 +26,12 @@ class AgentSettingsRead(BaseModel):
     instruct_model_id: uuid.UUID | None = None
     coder_model_id: uuid.UUID | None = None
     rag_enabled: bool = False
+    # Personal theme overrides — same shape as SystemBranding.theme_tokens.
+    # None means "no personal overrides, use system defaults".
+    theme_overrides: dict | None = None
+    # Built-in sidebar items this user has chosen to hide. Empty/None
+    # means "show all allowed".
+    hidden_nav_items: list[str] | None = None
 
 
 class AgentSettingsUpdate(BaseModel):
@@ -45,3 +51,8 @@ class AgentSettingsUpdate(BaseModel):
     instruct_model_id: uuid.UUID | None = None
     coder_model_id: uuid.UUID | None = None
     rag_enabled: bool | None = None
+    # Full replace of personal theme overrides. Use null/empty object to
+    # clear; pass a partial token blob to apply.
+    theme_overrides: dict | None = None
+    # Full replace of hidden sidebar items. Pass [] to clear.
+    hidden_nav_items: list[str] | None = None

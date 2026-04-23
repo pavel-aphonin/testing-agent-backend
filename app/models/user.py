@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,12 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         default=True,
         nullable=False,
     )
+
+    # Path (under ``app_uploads_dir``) to this user's avatar image.
+    # When NULL, the UI renders the default red circle with the first
+    # letter of the email. Served by the public ``/avatar-assets/``
+    # static mount — same treatment as the branding logos.
+    avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Eager-load role so permission checks don't need an extra query.
     role_obj: Mapped["Role"] = relationship(  # type: ignore[name-defined]  # noqa: F821

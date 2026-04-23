@@ -147,6 +147,14 @@ PERMISSION_SECTIONS: dict[str, SectionMeta] = {
             "assistant.use": {"ru": "Использовать", "en": "Use"},
         },
     },
+    "apps": {
+        "label_ru": "Приложения магазина",
+        "label_en": "Store apps",
+        "permissions": {
+            "apps.upload":   {"ru": "Загружать бандлы", "en": "Upload bundles"},
+            "apps.moderate": {"ru": "Модерировать (approve/reject)", "en": "Moderate (approve/reject)"},
+        },
+    },
 }
 
 # Flat set for fast membership checks in guards.

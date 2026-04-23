@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,6 +72,24 @@ class AgentSettings(Base):
 
     # RAG settings
     rag_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Personal theme overrides — merged on top of system branding tokens
+    # at render time, for THIS user only. Same shape as the system
+    # ``theme_tokens`` blob (see ``SystemBranding``), every key optional.
+    #
+    # Use case: the admin picked a brand accent that looks fine on
+    # most monitors but is hard on the user's particular display, and
+    # they'd like to override their personal copy without affecting
+    # anyone else.
+    theme_overrides: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Sidebar nav items the user has chosen to hide from their own view.
+    # Stored as a JSONB array of route keys ("/runs", "/scenarios",
+    # "/admin/users", …). The sidebar renderer simply filters these
+    # out. Empty/NULL = show everything the user's permissions allow.
+    # Different from the per-installation "hidden_from_sidebar" pref
+    # (which hides INSTALLED APPS) — this covers built-in Markov nav.
+    hidden_nav_items: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

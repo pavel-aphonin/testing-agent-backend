@@ -39,9 +39,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.users import current_active_user, require_permission
 from app.config import settings
 from app.db import get_async_session
+from app.models.app_audit import AppInstallationAudit, AppInstallationAuditAction
 from app.models.app_package import (
     AppApprovalStatus,
     AppInstallation,
+    AppInstallationUserPref,
     AppPackage,
     AppPackageVersion,
     AppReview,
@@ -51,6 +53,7 @@ from app.models.workspace import WorkspaceMember, WsRole
 from app.schemas.app_package import (
     AppApprovalDecision,
     AppInstallationRead,
+    AppInstallationUserPrefsUpdate,
     AppInstallRequest,
     AppInstallUpdate,
     AppPackageRead,
@@ -68,6 +71,41 @@ ws_apps_router = APIRouter(prefix="/api/workspaces", tags=["workspace-apps"])
 
 def _has_perm(user: User, perm: str) -> bool:
     return perm in (user.permissions or [])
+
+
+def _audit(
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    installation_id: UUID | None,
+    app_package_id: UUID | None,
+    package_name: str | None,
+    action: AppInstallationAuditAction,
+    user: User,
+    from_version: str | None = None,
+    to_version: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Record an audit row. Does not commit — the caller's commit ships it.
+
+    Keeping this inline rather than in a service module because it's a
+    3-line side-effect and wrapping it would hide the most important
+    callsites (install / update / uninstall).
+    """
+    session.add(
+        AppInstallationAudit(
+            workspace_id=workspace_id,
+            installation_id=installation_id,
+            app_package_id=app_package_id,
+            package_name=package_name,
+            action=action.value,
+            from_version=from_version,
+            to_version=to_version,
+            details=details,
+            user_id=user.id,
+            user_email=user.email,
+        )
+    )
 
 
 async def _enrich_package(pkg: AppPackage, session: AsyncSession) -> dict:
@@ -106,6 +144,7 @@ async def _enrich_package(pkg: AppPackage, session: AsyncSession) -> dict:
         "category": pkg.category,
         "author": pkg.author,
         "logo_path": pkg.logo_path,
+        "cover_path": pkg.cover_path,
         "is_public": pkg.is_public,
         "owner_workspace_id": pkg.owner_workspace_id,
         "approval_status": pkg.approval_status,
@@ -183,7 +222,7 @@ async def my_packages(
 
 @router.get("/admin/all", response_model=list[AppPackageRead])
 async def admin_all_packages(
-    _user: Annotated[User, Depends(require_permission("dictionaries.view"))],
+    _user: Annotated[User, Depends(require_permission("apps.moderate"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> list[dict]:
     res = await session.execute(select(AppPackage).order_by(AppPackage.created_at.desc()))
@@ -192,7 +231,7 @@ async def admin_all_packages(
 
 @router.get("/admin/pending", response_model=list[AppPackageRead])
 async def admin_pending(
-    _user: Annotated[User, Depends(require_permission("dictionaries.edit"))],
+    _user: Annotated[User, Depends(require_permission("apps.moderate"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> list[dict]:
     res = await session.execute(
@@ -243,13 +282,20 @@ async def upload_bundle(
     """Upload a ZIP bundle.
 
     Rules:
-      - Regular users: can upload, goes to DRAFT or PENDING depending on
-        ``submit_for_review``.
+      - Requires the ``apps.upload`` permission. Admins inherit it via
+        the system admin role; other roles must be granted it explicitly.
+      - Regular uploaders: can upload, goes to DRAFT or PENDING depending
+        on ``submit_for_review``.
       - Admins (users.view): can upload AND immediately auto-approve by
         passing ``submit_for_review=false``.
       - Private apps require ``owner_workspace_id`` pointing to a workspace
         the caller is a member of.
     """
+    if "apps.upload" not in (user.permissions or []):
+        raise HTTPException(
+            403,
+            "У вас нет прав на загрузку приложений в магазин (требуется apps.upload)",
+        )
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(400, "Ожидается ZIP-архив")
 
@@ -295,6 +341,7 @@ async def upload_bundle(
             category=manifest.category,
             author=manifest.author,
             logo_path=extracted.logo_relpath,
+            cover_path=extracted.cover_relpath,
             is_public=is_public,
             owner_workspace_id=owner_workspace_id,
             created_by_user_id=user.id,
@@ -315,6 +362,8 @@ async def upload_bundle(
         pkg.author = manifest.author
         if extracted.logo_relpath:
             pkg.logo_path = extracted.logo_relpath
+        if extracted.cover_relpath:
+            pkg.cover_path = extracted.cover_relpath
 
     # Reject duplicate version
     dup = await session.execute(
@@ -379,7 +428,9 @@ async def submit_for_review(
 async def approve_or_reject(
     pkg_id: UUID,
     decision: AppApprovalDecision,
-    admin: Annotated[User, Depends(require_permission("dictionaries.edit"))],
+    # Moderation is its own gate: you might have apps.upload but not the
+    # authority to approve your own submissions. Admin has both.
+    admin: Annotated[User, Depends(require_permission("apps.moderate"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> dict:
     pkg = await session.get(AppPackage, pkg_id)
@@ -571,7 +622,22 @@ async def list_installations(
     res = await session.execute(
         select(AppInstallation).where(AppInstallation.workspace_id == ws_id)
     )
-    rows = res.scalars().all()
+    rows = list(res.scalars().all())
+
+    # Bulk-load this user's prefs for all installations in the ws in
+    # one query instead of N+1.
+    inst_ids = [inst.id for inst in rows]
+    prefs_map: dict[UUID, dict] = {}
+    if inst_ids:
+        pref_q = await session.execute(
+            select(AppInstallationUserPref).where(
+                AppInstallationUserPref.user_id == user.id,
+                AppInstallationUserPref.installation_id.in_(inst_ids),
+            )
+        )
+        for p in pref_q.scalars().all():
+            prefs_map[p.installation_id] = p.prefs or {}
+
     out = []
     for inst in rows:
         pkg = await session.get(AppPackage, inst.app_package_id)
@@ -598,8 +664,52 @@ async def list_installations(
                 "is_deprecated": ver.is_deprecated,
                 "created_at": ver.created_at,
             } if ver else None,
+            "user_prefs": prefs_map.get(inst.id, {}),
         })
     return out
+
+
+@ws_apps_router.put("/{ws_id}/apps/{inst_id}/my-prefs", response_model=dict)
+async def update_my_installation_prefs(
+    ws_id: UUID,
+    inst_id: UUID,
+    payload: AppInstallationUserPrefsUpdate,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Replace the current user's per-installation UI prefs.
+
+    Any workspace member can call this for themselves — no moderator
+    check, because the prefs only affect what THIS user sees. Unknown
+    keys are stored as-is; consumers should tolerate missing keys.
+    """
+    await _require_ws_member(ws_id, user, session)
+
+    # Make sure the installation actually belongs to this workspace —
+    # otherwise someone could write prefs for another ws's app.
+    inst = await session.get(AppInstallation, inst_id)
+    if inst is None or inst.workspace_id != ws_id:
+        raise HTTPException(404, "Установка не найдена в этом пространстве")
+
+    res = await session.execute(
+        select(AppInstallationUserPref).where(
+            AppInstallationUserPref.user_id == user.id,
+            AppInstallationUserPref.installation_id == inst_id,
+        )
+    )
+    row = res.scalar_one_or_none()
+    if row is None:
+        row = AppInstallationUserPref(
+            user_id=user.id,
+            installation_id=inst_id,
+            prefs=payload.prefs or {},
+        )
+        session.add(row)
+    else:
+        row.prefs = payload.prefs or {}
+        row.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return {"prefs": row.prefs}
 
 
 @ws_apps_router.post("/{ws_id}/apps", response_model=AppInstallationRead, status_code=201)
@@ -686,6 +796,17 @@ async def install_app(
         installed_by_user_id=user.id,
     )
     session.add(inst)
+    await session.flush()  # get inst.id before the audit row references it
+    _audit(
+        session,
+        workspace_id=ws_id,
+        installation_id=inst.id,
+        app_package_id=pkg.id,
+        package_name=pkg.name,
+        action=AppInstallationAuditAction.INSTALLED,
+        to_version=ver.version,
+        user=user,
+    )
     await session.commit()
     await session.refresh(inst)
     return {
@@ -717,14 +838,64 @@ async def update_installation(
     if inst is None or inst.workspace_id != ws_id:
         raise HTTPException(404, "Installation not found")
 
-    if payload.version_id is not None:
+    pkg_before = await session.get(AppPackage, inst.app_package_id)
+    pkg_name = pkg_before.name if pkg_before else None
+
+    if payload.version_id is not None and payload.version_id != inst.version_id:
         ver = await session.get(AppPackageVersion, payload.version_id)
         if ver is None or ver.app_package_id != inst.app_package_id:
             raise HTTPException(404, "Version not found")
+        prev_ver = await session.get(AppPackageVersion, inst.version_id)
+        _audit(
+            session,
+            workspace_id=ws_id,
+            installation_id=inst.id,
+            app_package_id=inst.app_package_id,
+            package_name=pkg_name,
+            action=AppInstallationAuditAction.VERSION_CHANGED,
+            from_version=prev_ver.version if prev_ver else None,
+            to_version=ver.version,
+            user=user,
+        )
         inst.version_id = payload.version_id
-    if payload.settings is not None:
+
+    if payload.settings is not None and payload.settings != inst.settings:
+        # Record only which keys changed (not the values — they may
+        # contain secrets). Lets an admin see "someone edited api_token"
+        # without exposing the token itself.
+        before = inst.settings or {}
+        after = payload.settings
+        changed = sorted(
+            set(before.keys()) | set(after.keys())
+            if not isinstance(before, dict) or not isinstance(after, dict)
+            else {k for k in (set(before) | set(after)) if before.get(k) != after.get(k)}
+        )
+        _audit(
+            session,
+            workspace_id=ws_id,
+            installation_id=inst.id,
+            app_package_id=inst.app_package_id,
+            package_name=pkg_name,
+            action=AppInstallationAuditAction.SETTINGS_CHANGED,
+            details={"changed_keys": changed},
+            user=user,
+        )
         inst.settings = payload.settings
-    if payload.is_enabled is not None:
+
+    if payload.is_enabled is not None and payload.is_enabled != inst.is_enabled:
+        _audit(
+            session,
+            workspace_id=ws_id,
+            installation_id=inst.id,
+            app_package_id=inst.app_package_id,
+            package_name=pkg_name,
+            action=(
+                AppInstallationAuditAction.ENABLED
+                if payload.is_enabled
+                else AppInstallationAuditAction.DISABLED
+            ),
+            user=user,
+        )
         inst.is_enabled = payload.is_enabled
 
     await session.commit()
@@ -1115,5 +1286,61 @@ async def uninstall_app(
     inst = await session.get(AppInstallation, inst_id)
     if inst is None or inst.workspace_id != ws_id:
         raise HTTPException(404, "Installation not found")
+    pkg = await session.get(AppPackage, inst.app_package_id)
+    ver = await session.get(AppPackageVersion, inst.version_id)
+    _audit(
+        session,
+        workspace_id=ws_id,
+        installation_id=inst.id,
+        app_package_id=inst.app_package_id,
+        package_name=pkg.name if pkg else None,
+        action=AppInstallationAuditAction.UNINSTALLED,
+        from_version=ver.version if ver else None,
+        user=user,
+    )
     await session.delete(inst)
     await session.commit()
+
+
+# ── History / audit log ──────────────────────────────────────────────────────
+
+
+@ws_apps_router.get("/{ws_id}/apps-history", response_model=list[dict])
+async def list_apps_history(
+    ws_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    limit: int = 200,
+) -> list[dict]:
+    """Audit log of install/update/uninstall events for the workspace.
+
+    Any member can read (it's their history too). ``limit`` caps how many
+    rows come back; we sort newest-first so pagination via offset is easy
+    to add later if the table grows.
+    """
+    await _require_ws_member(ws_id, user, session)
+    res = await session.execute(
+        select(AppInstallationAudit)
+        .where(AppInstallationAudit.workspace_id == ws_id)
+        .order_by(AppInstallationAudit.created_at.desc())
+        .limit(max(1, min(limit, 1000)))
+    )
+    out: list[dict] = []
+    for row in res.scalars().all():
+        out.append(
+            {
+                "id": row.id,
+                "workspace_id": row.workspace_id,
+                "app_package_id": row.app_package_id,
+                "installation_id": row.installation_id,
+                "package_name": row.package_name,
+                "action": row.action,
+                "from_version": row.from_version,
+                "to_version": row.to_version,
+                "details": row.details,
+                "user_id": row.user_id,
+                "user_email": row.user_email,
+                "created_at": row.created_at,
+            }
+        )
+    return out

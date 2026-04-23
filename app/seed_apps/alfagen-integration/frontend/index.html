@@ -1,439 +1,924 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <title>AlfaGen Sandbox</title>
-  <style>
-    :root {
-      --primary: #EE3424;
-      --bg: #fafafa;
-      --card: #fff;
-      --border: #eee;
-      --muted: #999;
-      --text: #333;
-      --ok: #52c41a;
-      --err: #cf1322;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: var(--bg);
-      color: var(--text);
-    }
-    h1 { color: var(--primary); margin-top: 0; display: flex; align-items: center; gap: 12px; }
-    h1 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-    h1.connected .status-dot { background: var(--ok); }
-    h1.error .status-dot { background: var(--err); }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      padding: 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    .muted { color: var(--muted); font-size: 12px; }
-    code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
-    button {
-      background: var(--primary);
-      color: white;
-      border: 0;
-      padding: 8px 16px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button:disabled { opacity: 0.5; cursor: default; }
-    button.secondary { background: #f0f0f0; color: #333; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-    .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; font-size: 14px; }
-    .tab.active { border-bottom-color: var(--primary); color: var(--primary); font-weight: 600; }
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-    input, textarea, select {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 14px;
-      box-sizing: border-box;
-      font-family: inherit;
-    }
-    textarea { min-height: 80px; resize: vertical; }
-    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; }
-    .msg { padding: 10px 12px; margin-bottom: 8px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
-    .msg.user { background: #F1F5F9; }
-    .msg.assistant { background: #FEF3F2; border-left: 3px solid var(--primary); }
-    .msg .role { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
-    .msg .content { white-space: pre-wrap; }
-    .file-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: #f5f5f5;
-      padding: 4px 8px;
-      border-radius: 12px;
-      font-size: 12px;
-      margin-right: 6px;
-      margin-top: 4px;
-    }
-    .file-pill.active { background: #FEF3F2; border: 1px solid var(--primary); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    table th, table td { padding: 6px; text-align: left; border-bottom: 1px solid var(--border); }
-    table th { background: #fafafa; font-weight: 600; }
-    .progress { height: 4px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 8px; }
-    .progress > div { height: 100%; background: var(--primary); transition: width 0.3s; }
-    .error { color: var(--err); padding: 8px 12px; background: #FEF2F2; border-radius: 4px; margin-top: 8px; font-size: 12px; }
-    .ok { color: var(--ok); padding: 8px 12px; background: #F0FDF4; border-radius: 4px; margin-top: 8px; font-size: 12px; }
-    pre { font-size: 11px; background: #f5f5f5; padding: 8px; border-radius: 4px; overflow: auto; }
-  </style>
+<meta charset="utf-8">
+<title>AlfaGen Sandbox</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --bg:#fafafa; --card:#fff; --border:#ececec; --border-strong:#d9d9d9;
+    --muted:#8c8c8c; --text:#1f1f1f; --subtle:#595959;
+    --brand:#EE3424; --brand-soft:#fff3f3; --brand-ink:#a8241a;
+    --ok:#52c41a; --warn:#faad14; --err:#cf1322;
+    --radius:10px; --radius-sm:6px;
+    --shadow:0 1px 2px rgba(0,0,0,.04), 0 2px 8px rgba(0,0,0,.05);
+    --shadow-lg:0 4px 24px rgba(0,0,0,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+    font-size:14px; color:var(--text); background:var(--bg); overflow:hidden;
+  }
+  button{
+    font:inherit; cursor:pointer; border:0; background:transparent; color:inherit;
+  }
+  button.primary{
+    background:var(--brand); color:#fff; padding:8px 16px; border-radius:var(--radius-sm);
+    font-weight:500; transition:.15s;
+  }
+  button.primary:hover{background:var(--brand-ink)}
+  button.primary:disabled{background:#d9d9d9; cursor:not-allowed}
+  button.ghost{
+    padding:6px 12px; border-radius:var(--radius-sm); color:var(--subtle);
+    transition:.15s;
+  }
+  button.ghost:hover{background:#f5f5f5; color:var(--text)}
+  button.icon{
+    width:32px; height:32px; border-radius:var(--radius-sm);
+    display:inline-flex; align-items:center; justify-content:center; color:var(--muted);
+  }
+  button.icon:hover{background:#f0f0f0; color:var(--text)}
+  input, textarea, select{
+    font:inherit; border:1px solid var(--border-strong); padding:8px 12px;
+    border-radius:var(--radius-sm); background:#fff; outline:none; color:var(--text);
+    transition:.15s; width:100%;
+  }
+  input:focus, textarea:focus, select:focus{border-color:var(--brand); box-shadow:0 0 0 3px rgba(238,52,36,.1)}
+  textarea{resize:none; line-height:1.5}
+
+  /* ── App layout ─────────────────────────────────────────────────── */
+  .app{display:grid; grid-template-columns:260px 1fr; height:100vh}
+  .sidebar{
+    background:#fff; border-right:1px solid var(--border);
+    display:flex; flex-direction:column; min-width:0;
+  }
+  .sidebar-header{
+    padding:16px 20px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:10px;
+  }
+  .logo{
+    width:32px; height:32px; border-radius:8px;
+    background:var(--brand);
+    display:inline-flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700; font-size:16px; flex-shrink:0;
+  }
+  .brand-name{font-weight:600; font-size:15px}
+  .brand-sub{font-size:11px; color:var(--muted); margin-top:-2px}
+
+  .demo-badge{
+    margin:0 20px 8px; padding:6px 10px; border-radius:6px;
+    background:#fffbe6; border:1px solid #ffe58f; color:#874d00;
+    font-size:11px; line-height:1.4; display:none;
+  }
+  .demo-badge.show{display:block}
+
+  .new-chat-btn{
+    margin:12px 12px 8px; padding:10px; border-radius:var(--radius-sm);
+    display:flex; align-items:center; gap:8px;
+    color:var(--brand); border:1px solid var(--border-strong);
+    justify-content:center; font-weight:500;
+  }
+  .new-chat-btn:hover{background:var(--brand-soft); border-color:var(--brand)}
+
+  .chat-list{flex:1; overflow-y:auto; padding:4px 8px}
+  .chat-item{
+    padding:8px 12px; border-radius:var(--radius-sm); cursor:pointer;
+    font-size:13px; color:var(--subtle);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    display:flex; align-items:center; gap:8px;
+  }
+  .chat-item:hover{background:#f5f5f5}
+  .chat-item.active{background:var(--brand-soft); color:var(--brand); font-weight:500}
+  .chat-item .dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; opacity:.5}
+
+  .sidebar-nav{border-top:1px solid var(--border); padding:8px}
+  .nav-item{
+    padding:8px 12px; border-radius:var(--radius-sm); cursor:pointer;
+    font-size:13px; color:var(--subtle); display:flex; align-items:center; gap:10px;
+  }
+  .nav-item:hover{background:#f5f5f5; color:var(--text)}
+  .nav-item.active{background:#f0f0f0; color:var(--text); font-weight:500}
+  .nav-icon{font-size:16px; width:18px; text-align:center}
+
+  /* ── Main pane ──────────────────────────────────────────────────── */
+  .main{display:flex; flex-direction:column; min-width:0; min-height:0}
+  .topbar{
+    padding:12px 24px; border-bottom:1px solid var(--border); background:#fff;
+    display:flex; align-items:center; gap:12px; justify-content:space-between;
+  }
+  .topbar-title{font-size:15px; font-weight:500; color:var(--text); min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .model-picker{
+    display:flex; align-items:center; gap:8px;
+  }
+  .model-picker select{
+    padding:6px 10px; width:auto; min-width:200px; font-size:13px;
+  }
+
+  .conn-pill{
+    font-size:11px; padding:3px 10px; border-radius:10px;
+    display:inline-flex; align-items:center; gap:6px;
+    background:#f5f5f5; color:var(--muted);
+  }
+  .conn-pill .dot{width:6px; height:6px; border-radius:50%; background:var(--muted)}
+  .conn-pill.ok{background:#f6ffed; color:#237804}
+  .conn-pill.ok .dot{background:var(--ok)}
+  .conn-pill.demo{background:#fffbe6; color:#874d00}
+  .conn-pill.demo .dot{background:var(--warn)}
+
+  /* ── Messages ───────────────────────────────────────────────────── */
+  .messages{flex:1; overflow-y:auto; padding:24px; scroll-behavior:smooth}
+  .msg-welcome{
+    max-width:640px; margin:64px auto 0; text-align:center; color:var(--subtle);
+  }
+  .msg-welcome h2{font-size:22px; color:var(--text); margin:16px 0 8px}
+  .msg-welcome p{line-height:1.6; margin:4px 0}
+  .suggestions{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:24px; text-align:left;
+  }
+  .suggestion{
+    padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius);
+    background:#fff; cursor:pointer; transition:.15s;
+  }
+  .suggestion:hover{border-color:var(--brand); background:var(--brand-soft)}
+  .suggestion strong{display:block; font-size:13px; color:var(--text); margin-bottom:2px}
+  .suggestion span{font-size:12px; color:var(--muted)}
+
+  .msg{max-width:820px; margin:0 auto 20px; display:flex; gap:12px}
+  .msg-avatar{
+    width:32px; height:32px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:600;
+  }
+  .msg.user .msg-avatar{background:#e6f4ff; color:#0958d9}
+  .msg.assistant .msg-avatar{background:var(--brand); color:#fff}
+  .msg-body{flex:1; min-width:0}
+  .msg-role{font-size:11px; color:var(--muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:.3px}
+  .msg-content{
+    line-height:1.6; white-space:pre-wrap; word-wrap:break-word;
+  }
+  .msg-content p{margin:6px 0}
+  .msg-content ul, .msg-content ol{margin:6px 0; padding-left:22px}
+  .msg-content li{margin:3px 0}
+  .msg-content code{background:#f3f3f5; padding:1px 5px; border-radius:3px; font-size:12.5px}
+  .msg-content pre{background:#fafafa; border:1px solid var(--border); padding:10px 12px;
+    border-radius:var(--radius-sm); overflow-x:auto; font-size:12.5px; line-height:1.5}
+  .msg-attachments{margin-top:8px; display:flex; flex-wrap:wrap; gap:6px}
+  .attachment-chip{
+    background:#f0f5ff; border:1px solid #adc6ff; border-radius:12px;
+    padding:3px 10px; font-size:11.5px; color:#0958d9;
+  }
+
+  .typing-dots{display:inline-flex; gap:4px; padding:2px 0}
+  .typing-dots span{
+    width:7px; height:7px; border-radius:50%; background:var(--muted);
+    animation:blink 1.4s infinite both;
+  }
+  .typing-dots span:nth-child(2){animation-delay:.2s}
+  .typing-dots span:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.3}40%{opacity:1}}
+
+  /* ── Composer ───────────────────────────────────────────────────── */
+  .composer{border-top:1px solid var(--border); background:#fff; padding:16px 24px}
+  .composer-inner{max-width:820px; margin:0 auto}
+  .composer-box{
+    border:1px solid var(--border-strong); border-radius:var(--radius);
+    padding:10px 12px; display:flex; gap:8px; align-items:flex-end;
+    background:#fff; transition:.15s;
+  }
+  .composer-box:focus-within{border-color:var(--brand); box-shadow:0 0 0 3px rgba(238,52,36,.1)}
+  .composer-box textarea{
+    border:0; padding:4px 0; max-height:200px; min-height:24px;
+  }
+  .composer-box textarea:focus{box-shadow:none}
+  .composer-actions{display:flex; gap:2px; align-items:center}
+  .composer-foot{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:8px; font-size:11.5px; color:var(--muted);
+  }
+  .staged-files{
+    display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;
+  }
+
+  /* ── Files panel ────────────────────────────────────────────────── */
+  .panel{flex:1; overflow-y:auto; padding:24px}
+  .panel-title{font-size:18px; font-weight:600; margin:0 0 4px}
+  .panel-sub{color:var(--muted); font-size:13px; margin-bottom:20px}
+
+  .file-row{
+    display:grid; grid-template-columns:auto 1fr auto auto; gap:12px;
+    align-items:center; padding:12px 14px; border:1px solid var(--border);
+    border-radius:var(--radius); background:#fff; margin-bottom:8px;
+  }
+  .file-icon{
+    width:36px; height:36px; border-radius:8px; background:#f0f5ff;
+    color:#0958d9; display:flex; align-items:center; justify-content:center;
+    font-size:15px; font-weight:600;
+  }
+  .file-meta strong{display:block; font-size:13.5px}
+  .file-meta span{font-size:11.5px; color:var(--muted)}
+  .file-progress{width:140px}
+  .progress-bar{height:4px; background:#f0f0f0; border-radius:2px; overflow:hidden}
+  .progress-fill{height:100%; background:var(--brand); transition:width .3s}
+  .progress-text{font-size:11px; color:var(--muted); margin-top:3px}
+
+  .dropzone{
+    border:2px dashed var(--border-strong); border-radius:var(--radius);
+    padding:32px; text-align:center; background:#fff; cursor:pointer;
+    transition:.15s; margin-bottom:20px;
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--brand); background:var(--brand-soft)}
+  .dropzone strong{display:block; color:var(--text); font-size:15px; margin-bottom:4px}
+  .dropzone span{color:var(--muted); font-size:12.5px}
+
+  /* ── Models panel ───────────────────────────────────────────────── */
+  .model-card{
+    border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 18px; background:#fff; margin-bottom:10px;
+  }
+  .model-card-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:6px}
+  .model-name{font-weight:600; font-size:14.5px}
+  .model-tags{display:flex; gap:4px; flex-wrap:wrap}
+  .model-tag{font-size:10.5px; padding:2px 8px; border-radius:8px; background:#f0f5ff; color:#0958d9}
+  .model-tag.vision{background:#f9f0ff; color:#531dab}
+  .model-tag.active{background:var(--brand-soft); color:var(--brand)}
+  .model-card p{margin:4px 0 0; color:var(--subtle); font-size:12.5px; line-height:1.5}
+
+  /* ── Scrollbar polish ───────────────────────────────────────────── */
+  *::-webkit-scrollbar{width:8px; height:8px}
+  *::-webkit-scrollbar-thumb{background:#d9d9d9; border-radius:4px}
+  *::-webkit-scrollbar-thumb:hover{background:#bfbfbf}
+
+  .hidden{display:none !important}
+</style>
 </head>
 <body>
-  <h1 id="header">
-    <span class="status-dot"></span>
-    AlfaGen Sandbox
-  </h1>
-  <p class="muted" id="subheader">Ожидаем инициализации…</p>
-
-  <div class="tabs">
-    <div class="tab active" data-tab="chat">💬 Чат</div>
-    <div class="tab" data-tab="files">📄 Файлы / RAG</div>
-    <div class="tab" data-tab="models">🧠 Модели</div>
-    <div class="tab" data-tab="info">⚙️ Подключение</div>
-  </div>
-
-  <!-- ────────────── Chat ────────────── -->
-  <div class="tab-panel active" data-tab="chat">
-    <div class="card">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-        <strong>Модель:</strong>
-        <select id="chat-model" style="width:auto;flex:1;max-width:360px;"></select>
-        <button class="secondary" id="chat-clear">Очистить</button>
+<div class="app">
+  <!-- ═══ Sidebar ═══ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">A</div>
+      <div>
+        <div class="brand-name">AlfaGen</div>
+        <div class="brand-sub">Sandbox</div>
       </div>
-      <div id="chat-files" style="margin-bottom:8px;"></div>
-      <div id="chat-log" style="max-height:40vh;overflow:auto;margin-bottom:12px;"></div>
-      <textarea id="chat-input" placeholder="Введите сообщение..."></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button id="chat-send">Отправить</button>
-        <span class="muted" id="chat-status"></span>
+    </div>
+    <div id="demo-badge" class="demo-badge">
+      Работает в демо-режиме на локальных моках. Когда придут доступы к Sandbox API — подставится реальный ключ и всё начнёт работать без правок.
+    </div>
+    <button class="new-chat-btn" onclick="AlfaGen.newChat()">
+      <span>＋</span><span>Новый чат</span>
+    </button>
+    <div class="chat-list" id="chat-list"></div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" data-view="chat" onclick="AlfaGen.showView('chat')">
+        <span class="nav-icon">💬</span><span>Чат</span>
       </div>
-      <div id="chat-error"></div>
+      <div class="nav-item" data-view="files" onclick="AlfaGen.showView('files')">
+        <span class="nav-icon">📎</span><span>Файлы и RAG</span>
+      </div>
+      <div class="nav-item" data-view="models" onclick="AlfaGen.showView('models')">
+        <span class="nav-icon">🧠</span><span>Модели</span>
+      </div>
     </div>
-    <p class="muted">
-      Модели с поддержкой картинок помечены 👁. Чтобы прикрепить файл к запросу,
-      загрузите его во вкладке «Файлы / RAG» и нажмите на «прикрепить» у файла.
-    </p>
-  </div>
+  </aside>
 
-  <!-- ────────────── Files ────────────── -->
-  <div class="tab-panel" data-tab="files">
-    <div class="card">
-      <label>Загрузить PDF / текст / документ</label>
-      <input type="file" id="file-input" accept=".pdf,.txt,.md,.docx,.html,.doc">
-      <button id="file-upload" style="margin-top:8px;">Загрузить</button>
-      <div class="progress" id="upload-progress" style="display:none;"><div style="width:0"></div></div>
-      <div id="upload-status"></div>
+  <!-- ═══ Main pane ═══ -->
+  <main class="main">
+    <!-- CHAT VIEW -->
+    <div id="view-chat" style="display:flex; flex-direction:column; flex:1; min-height:0">
+      <div class="topbar">
+        <div class="topbar-title" id="chat-title">Новый чат</div>
+        <div class="model-picker">
+          <span class="conn-pill" id="conn-pill"><span class="dot"></span><span id="conn-text">—</span></span>
+          <select id="model-select" onchange="AlfaGen.setModel(this.value)"></select>
+        </div>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="staged-files" id="staged-files"></div>
+          <div class="composer-box">
+            <textarea id="composer-input" rows="1"
+              placeholder="Спросите что-нибудь…"
+              oninput="AlfaGen.autosize(this)"
+              onkeydown="AlfaGen.onKey(event)"></textarea>
+            <div class="composer-actions">
+              <button class="icon" onclick="AlfaGen.attachClick()" title="Прикрепить файл">📎</button>
+              <button class="primary" id="send-btn" onclick="AlfaGen.send()" disabled>→</button>
+            </div>
+          </div>
+          <div class="composer-foot">
+            <span id="context-note">Прикреплённых файлов нет</span>
+            <span><code>Enter</code> — отправить, <code>Shift</code>+<code>Enter</code> — перенос строки</span>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <strong>Загруженные файлы (эта сессия)</strong>
-      <div id="files-list" class="muted" style="margin-top:8px;">Пока ничего не загружено</div>
-    </div>
-  </div>
 
-  <!-- ────────────── Models ────────────── -->
-  <div class="tab-panel" data-tab="models">
-    <div class="card">
-      <button id="models-refresh">Обновить</button>
-      <div id="models-list" style="margin-top:12px;">Нажмите «Обновить»</div>
+    <!-- FILES VIEW -->
+    <div id="view-files" class="panel hidden">
+      <h2 class="panel-title">Файлы и RAG</h2>
+      <p class="panel-sub">Загружайте PDF, DOCX, TXT. Загруженные файлы можно прикрепить к сообщению — модель будет отвечать с опорой на их содержимое.</p>
+      <div class="dropzone" id="dropzone" onclick="AlfaGen.attachClick()">
+        <strong>Перетащите сюда файл или нажмите для выбора</strong>
+        <span>PDF, DOCX, TXT · до 20 МБ · обрабатывается 10–40 секунд</span>
+      </div>
+      <div id="file-list"></div>
     </div>
-  </div>
 
-  <!-- ────────────── Info ────────────── -->
-  <div class="tab-panel" data-tab="info">
-    <div class="card">
-      <strong>Проверка подключения</strong>
-      <p class="muted">Обращается к <code>/internal/llm/v1/models</code> для проверки, что токен валиден и Sandbox отвечает.</p>
-      <button id="ping-btn">Проверить</button>
-      <div id="ping-result"></div>
+    <!-- MODELS VIEW -->
+    <div id="view-models" class="panel hidden">
+      <h2 class="panel-title">Доступные модели</h2>
+      <p class="panel-sub">Из каталога AlfaGen Sandbox. Модель, выбранная здесь или в чате, используется по умолчанию для этого пространства.</p>
+      <div id="model-list"></div>
     </div>
-    <div class="card">
-      <strong>Настройки (readonly)</strong>
-      <p class="muted">Отредактируйте их в карточке установки приложения в разделе «Приложения пространства».</p>
-      <pre id="settings-preview">—</pre>
-    </div>
-    <div class="card">
-      <strong>Примечания</strong>
-      <ul class="muted" style="font-size:12px;">
-        <li>Sandbox доступен только из сети VPN / VDI Альфа-Банка</li>
-        <li>Лимит: 0.2 RPS (1 запрос в 5 секунд)</li>
-        <li>Срок: 3 месяца с момента выдачи ключа</li>
-        <li>Выдача ключа: ~2 рабочих дня через EYanovskaya@alfabank.ru</li>
-      </ul>
-    </div>
-  </div>
+  </main>
+</div>
+
+<input type="file" id="file-picker" style="display:none"
+  accept=".pdf,.doc,.docx,.txt,.md"
+  onchange="AlfaGen.onFilePicked(this)">
 
 <script>
-  // ─────────── State ───────────
-  let token = null, apiBase = null, ctx = null;
-  const uploadedFiles = []; // {fileId, name, size, attached}
-  const chatHistory = [];   // OpenAI-compat messages for the model
-  const VISION_MODELS = ["qwen-2.5-32b-vl", "openai/qwen3-vl-30b-a3b-thinking"];
+// ────────────────────────────────────────────────────────────────────
+// AlfaGen Sandbox frontend.
+//
+// Talks to the Markov backend's AlfaGen proxy endpoints. When those are
+// unreachable (demo setups with no real Sandbox access) we transparently
+// fall back to canned mocks — so the demo stays alive without pretending
+// the data is real (we show the yellow "демо-режим" badge in the corner).
+// ────────────────────────────────────────────────────────────────────
 
-  // ─────────── Tabs ───────────
-  document.querySelectorAll(".tab").forEach((el) => {
-    el.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-      el.classList.add("active");
-      document.querySelector(`.tab-panel[data-tab="${el.dataset.tab}"]`).classList.add("active");
+const AlfaGen = (() => {
+  let api = "";           // Markov backend base — filled by bootstrap
+  let token = "";         // installation token — filled by bootstrap
+  let installationId = ""; // needed for routing proxy calls
+  let workspaceId = "";
+  let demoMode = true;    // flipped to false when real proxy pings ok
+  let models = [];
+  let currentModel = "";
+  let chats = [];         // { id, title, messages:[{role, content, attachments?}] }
+  let currentChatId = null;
+  let stagedFiles = [];   // { id, name, size, progress, done, chunks }
+  let sending = false;
+  let currentView = "chat";
+
+  // ── Canned data for demo mode ────────────────────────────────────
+  const DEMO_MODELS = [
+    {id:"Qwen/QwQ-32B", name:"Qwen/QwQ-32B",
+      desc:"Рассуждающая модель 32B от Alibaba. Хорошо справляется со сложным анализом, пишет подробные развёрнутые ответы. Медленнее обычных моделей, но точнее.",
+      tags:["reasoning","32B"]},
+    {id:"gpt-oss-120b", name:"gpt-oss-120b",
+      desc:"Большая open-source модель уровня GPT-4. Универсальная: код, анализ, тексты, структурированные ответы. Подходит для любых QA-задач.",
+      tags:["универсальная","120B"]},
+    {id:"/models/llama-3.3", name:"Llama 3.3",
+      desc:"Meta Llama 3.3. Быстрая, экономит токены. Хороша там, где нужны короткие конкретные ответы без длинных рассуждений.",
+      tags:["быстрая"]},
+    {id:"Qwen/Qwen3-Coder-Next", name:"Qwen3-Coder-Next",
+      desc:"Специализированная модель для кода. Пишет, объясняет, рефакторит, находит баги. Лучший выбор для вопросов «почему этот код падает».",
+      tags:["код"]},
+    {id:"qwen-2.5-32b-vl", name:"Qwen 2.5 VL",
+      desc:"Мультимодальная модель: принимает изображения и документы. Умеет описывать скриншоты интерфейса, находить дефекты по фото экрана.",
+      tags:["vision"]},
+    {id:"openai/qwen3-vl-30b-a3b-thinking", name:"Qwen3 VL Thinking",
+      desc:"Vision + рассуждения. Анализирует скриншоты со сложной логикой: «что здесь не так в UX», «соответствует ли экран требованиям».",
+      tags:["vision","reasoning"]},
+  ];
+
+  const CANNED_REPLIES = {
+    "доступ": (
+      "Чтобы получить доступ к AlfaGen Sandbox:\n\n" +
+      "1. Напишите на **EYanovskaya@alfabank.ru**\n" +
+      "2. Укажите: ФИО, почту, команду, краткое описание задачи\n" +
+      "3. Токен в формате UUID приходит за 1–2 рабочих дня\n\n" +
+      "Обратите внимание: Sandbox доступен только из VPN или VDI " +
+      "и имеет лимит **0.2 запроса в секунду**. Срок действия — 3 месяца."
+    ),
+    "модель": (
+      "Короткая шпаргалка по выбору:\n\n" +
+      "- **Qwen/QwQ-32B** — когда нужно рассуждение и подробный ответ\n" +
+      "- **gpt-oss-120b** — универсальная, хороша для большинства QA-задач\n" +
+      "- **llama-3.3** — быстрая, экономит токены, короткие ответы\n" +
+      "- **Qwen3-Coder-Next** — только для вопросов по коду\n" +
+      "- **qwen-2.5-32b-vl** — если нужно показать модели скриншот\n" +
+      "- **qwen3-vl-30b-a3b-thinking** — vision + рассуждения"
+    ),
+    "дефект": (
+      "Вот пример оформления найденного дефекта по ГОСТ:\n\n" +
+      "**Заголовок:** [Главный экран] Кнопка «Подтвердить» не реагирует на нажатие\n\n" +
+      "**Шаги воспроизведения:**\n" +
+      "1. Открыть приложение и авторизоваться\n" +
+      "2. Заполнить форму заявки корректными данными\n" +
+      "3. Нажать «Подтвердить»\n\n" +
+      "**Ожидаемый результат:** Переход на экран успеха, уведомление «Заявка создана»\n" +
+      "**Фактический результат:** Ничего не происходит, в консоли `ERR_NETWORK`\n\n" +
+      "**Приоритет:** P1 (блокирующий)"
+    ),
+    "rag": (
+      "RAG — это когда модель отвечает, опираясь на ваши документы. Как использовать:\n\n" +
+      "1. Перейдите в раздел **Файлы и RAG** слева\n" +
+      "2. Загрузите PDF/DOCX/TXT — дождитесь обработки (10-40 сек)\n" +
+      "3. Прикрепите файл к следующему сообщению — появится значок 📎 рядом с полем\n" +
+      "4. Задайте вопрос — модель ответит с цитатами из вашего документа\n\n" +
+      "Подходит для: спецификаций, acceptance criteria, документации API, " +
+      "тест-планов. Модель видит текст, таблицы и структуру заголовков."
+    ),
+    "default": (
+      "Привет! Я — AlfaGen, корпоративный ассистент на базе LLM-моделей Alibaba, Meta и OpenAI-совместимых. Я умею:\n\n" +
+      "- Отвечать на вопросы по тестированию, QA-процессам, API\n" +
+      "- Разбирать и переоформлять дефекты по ГОСТ\n" +
+      "- Анализировать результаты запусков агента (см. вкладку «Анализ через AlfaGen» на странице запуска)\n" +
+      "- Работать с вашими документами через RAG\n\n" +
+      "О чём хотите поговорить?"
+    ),
+  };
+
+  function pickReply(prompt){
+    const p = prompt.toLowerCase();
+    if(/доступ|токен|ключ|uuid|eyanovskaya/.test(p)) return CANNED_REPLIES["доступ"];
+    if(/модел|какую выбрать|qwen|llama|gpt/.test(p))   return CANNED_REPLIES["модель"];
+    if(/дефект|баг|bug|гост|оформ/.test(p))            return CANNED_REPLIES["дефект"];
+    if(/rag|документ|файл|pdf|docx/.test(p))           return CANNED_REPLIES["rag"];
+    return CANNED_REPLIES["default"];
+  }
+
+  // ── Bootstrap ────────────────────────────────────────────────────
+  function init(){
+    window.addEventListener("message", (ev) => {
+      if(ev.data?.type !== "markov.bootstrap") return;
+      api = ev.data.apiBase || "";
+      token = ev.data.token || "";
+      const ctx = ev.data.context || {};
+      installationId = ctx.installation_id || "";
+      workspaceId = ctx.workspace_id || "";
+      checkConnectivity();
     });
-  });
-
-  // ─────────── Bootstrap ───────────
-  window.addEventListener("message", async (evt) => {
-    if (!evt.data || evt.data.type !== "markov.bootstrap") return;
-    token = evt.data.token;
-    apiBase = evt.data.apiBase ?? "";
-
-    const r = await fetch(apiBase + "/api/apps/me/context", {
-      headers: { Authorization: "Bearer " + token },
-    });
-    ctx = await r.json();
-
-    document.getElementById("subheader").textContent =
-      `Пространство: ${ctx.workspace_id.slice(0,8)}… · Модель по умолчанию: ${ctx.settings?.default_model || "—"}`;
-
-    // Hide secrets for display
-    const disp = { ...(ctx.settings || {}) };
-    if (disp.api_token) disp.api_token = "***" + String(disp.api_token).slice(-4);
-    document.getElementById("settings-preview").textContent = JSON.stringify(disp, null, 2);
-
-    // Default model in chat selector
-    populateModelSelect([ctx.settings?.default_model].filter(Boolean));
-    // Auto-ping
-    ping();
-  });
-  window.parent.postMessage({ type: "markov.ready" }, "*");
-
-  // ─────────── Proxy helper ───────────
-  async function alfa(path, opts = {}) {
-    const url = `${apiBase}/api/apps/builtins/alfagen${path}`;
-    const params = opts.params || {};
-    params.installation_id = ctx.installation_id;
-    const qs = new URLSearchParams(params).toString();
-    const finalUrl = qs ? `${url}?${qs}` : url;
-    const fetchOpts = {
-      method: opts.method || "GET",
-      headers: {
-        Authorization: "Bearer " + token,
-        ...(opts.body ? { "Content-Type": "application/json" } : {}),
-      },
-    };
-    if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
-    if (opts.form) {
-      delete fetchOpts.headers["Content-Type"];
-      fetchOpts.body = opts.form;
-    }
-    const resp = await fetch(finalUrl, fetchOpts);
-    const data = resp.status === 204 ? null : await resp.json();
-    if (!resp.ok) {
-      const msg = data?.detail || resp.statusText;
-      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-    }
-    return data;
+    window.parent?.postMessage({type:"markov.ready"}, "*");
+    setTimeout(() => { if(!token) checkConnectivity(); }, 800);
+    renderModels();
+    renderFiles();
+    newChat(true);  // start with an empty welcome chat
   }
 
-  // ─────────── Ping ───────────
-  async function ping() {
-    const h = document.getElementById("header");
-    const r = document.getElementById("ping-result");
+  async function checkConnectivity(){
+    const pill = document.getElementById("conn-pill");
+    const text = document.getElementById("conn-text");
+    const badge = document.getElementById("demo-badge");
     try {
-      const data = await alfa("/ping");
-      h.className = "connected";
-      if (r) r.innerHTML = `<div class="ok">✓ Подключено. Доступно моделей: ${data.models?.length ?? "?"}</div>`;
-      if (data.models) populateModelSelect(data.models.map((m) => m.id || m));
-    } catch (e) {
-      h.className = "error";
-      if (r) r.innerHTML = `<div class="error">✗ ${e.message}</div>`;
-    }
-  }
-  document.getElementById("ping-btn").onclick = ping;
-
-  // ─────────── Models ───────────
-  function populateModelSelect(models) {
-    const sel = document.getElementById("chat-model");
-    const current = sel.value;
-    sel.innerHTML = "";
-    for (const m of models) {
-      const opt = document.createElement("option");
-      opt.value = m;
-      const visionMark = VISION_MODELS.some((v) => m.includes(v)) ? " 👁" : "";
-      opt.textContent = m + visionMark;
-      sel.appendChild(opt);
-    }
-    if (current && models.includes(current)) sel.value = current;
-    else if (ctx?.settings?.default_model && models.includes(ctx.settings.default_model)) {
-      sel.value = ctx.settings.default_model;
-    }
-  }
-
-  document.getElementById("models-refresh").onclick = async () => {
-    const out = document.getElementById("models-list");
-    out.textContent = "Загрузка…";
-    try {
-      const data = await alfa("/models");
-      const items = data.data || data.models || [];
-      if (items.length === 0) {
-        out.innerHTML = "<span class=muted>Список пуст</span>";
+      if(!token) throw new Error("нет токена");
+      const r = await fetch(`${api}/api/apps/builtins/alfagen/ping`, {
+        headers:{Authorization:`Bearer ${token}`},
+      });
+      const j = await r.json();
+      if(j.ok){
+        demoMode = false;
+        pill.className = "conn-pill ok";
+        text.textContent = "Sandbox подключён";
+        badge.classList.remove("show");
+        // pull real models once we're connected
+        try {
+          const mr = await fetch(`${api}/api/apps/builtins/alfagen/models`, {
+            headers:{Authorization:`Bearer ${token}`},
+          });
+          const mj = await mr.json();
+          if(Array.isArray(mj.data) && mj.data.length){
+            models = mj.data.map(m => ({
+              id:m.id, name:m.id, desc:"Реальная модель из Sandbox API",
+              tags:["real"],
+            }));
+            populateModelSelect();
+            renderModels();
+          }
+        } catch (e){}
         return;
       }
-      const rows = items.map((m) => {
-        const id = m.id || m;
-        return `<tr><td><code>${id}</code></td><td>${m.description || ""}</td></tr>`;
-      }).join("");
-      out.innerHTML = `<table><thead><tr><th>Модель</th><th>Описание</th></tr></thead><tbody>${rows}</tbody></table>`;
-      populateModelSelect(items.map((m) => m.id || m));
-    } catch (e) {
-      out.innerHTML = `<div class="error">${e.message}</div>`;
+      throw new Error(j.detail || "ping failed");
+    } catch (e){
+      demoMode = true;
+      pill.className = "conn-pill demo";
+      text.textContent = "Демо-режим";
+      badge.classList.add("show");
+      models = DEMO_MODELS;
+      populateModelSelect();
+      renderModels();
     }
-  };
+  }
 
-  // ─────────── Files ───────────
-  document.getElementById("file-upload").onclick = async () => {
-    const input = document.getElementById("file-input");
-    const file = input.files?.[0];
-    if (!file) return;
-    const statusEl = document.getElementById("upload-status");
-    const progress = document.getElementById("upload-progress");
-    const bar = progress.querySelector("div");
-    statusEl.innerHTML = "";
-    progress.style.display = "block";
-    bar.style.width = "10%";
+  // ── View switching ───────────────────────────────────────────────
+  function showView(name){
+    currentView = name;
+    ["chat","files","models"].forEach(v => {
+      document.getElementById(`view-${v}`).classList.toggle("hidden", v !== name);
+    });
+    document.querySelectorAll(".nav-item").forEach(el => {
+      el.classList.toggle("active", el.dataset.view === name);
+    });
+  }
 
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const uploadResp = await alfa("/upload", { method: "POST", form: fd });
-      bar.style.width = "50%";
-      if (!uploadResp.task_id) throw new Error("Нет taskId в ответе");
-
-      // Poll status until file_id appears
-      let fileId = null;
-      for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const s = await alfa("/upload-status", { params: { task_id: uploadResp.task_id } });
-        if (s.status === "COMPLETED" && s.file_id) {
-          fileId = s.file_id;
-          break;
-        }
-        if (s.status === "FAILED") throw new Error(s.error || "Файл не обработан");
-        bar.style.width = Math.min(95, 50 + i * 2) + "%";
-      }
-      if (!fileId) throw new Error("Таймаут обработки файла");
-
-      bar.style.width = "100%";
-      statusEl.innerHTML = `<div class="ok">✓ Загружен: ${file.name} (${fileId.slice(0,8)}…)</div>`;
-      uploadedFiles.push({
-        fileId, name: file.name, size: file.size, attached: false,
-      });
-      renderFiles();
-      input.value = "";
-      setTimeout(() => { progress.style.display = "none"; bar.style.width = "0"; }, 800);
-    } catch (e) {
-      statusEl.innerHTML = `<div class="error">${e.message}</div>`;
-      progress.style.display = "none";
+  // ── Model select ─────────────────────────────────────────────────
+  function populateModelSelect(){
+    const sel = document.getElementById("model-select");
+    sel.innerHTML = models.map(m =>
+      `<option value="${escapeAttr(m.id)}">${escapeHtml(m.name)}</option>`
+    ).join("");
+    if(!currentModel || !models.find(m => m.id === currentModel)){
+      currentModel = models[0]?.id ?? "";
     }
-  };
+    sel.value = currentModel;
+  }
+  function setModel(id){ currentModel = id; }
 
-  function renderFiles() {
-    const list = document.getElementById("files-list");
-    const chatFiles = document.getElementById("chat-files");
-    if (uploadedFiles.length === 0) {
-      list.textContent = "Пока ничего не загружено";
-      chatFiles.innerHTML = "";
+  function renderModels(){
+    const el = document.getElementById("model-list");
+    el.innerHTML = models.map(m => `
+      <div class="model-card">
+        <div class="model-card-head">
+          <div class="model-name">${escapeHtml(m.name)}</div>
+          <div class="model-tags">
+            ${m.tags.map(t => {
+              const cls = t === "vision" || t === "reasoning" ? "vision" : "";
+              return `<span class="model-tag ${cls}">${escapeHtml(t)}</span>`;
+            }).join("")}
+          </div>
+        </div>
+        <p>${escapeHtml(m.desc)}</p>
+      </div>
+    `).join("");
+  }
+
+  // ── Chat management ──────────────────────────────────────────────
+  function newChat(isInitial){
+    const id = "c" + Date.now();
+    const chat = { id, title:"Новый чат", messages:[] };
+    chats.unshift(chat);
+    currentChatId = id;
+    renderChatList();
+    renderMessages();
+    document.getElementById("chat-title").textContent = chat.title;
+    if(!isInitial) document.getElementById("composer-input").focus();
+  }
+
+  function switchChat(id){
+    currentChatId = id;
+    renderChatList();
+    renderMessages();
+    const c = getCurrentChat();
+    document.getElementById("chat-title").textContent = c?.title ?? "Новый чат";
+  }
+
+  function getCurrentChat(){ return chats.find(c => c.id === currentChatId); }
+
+  function renderChatList(){
+    const el = document.getElementById("chat-list");
+    el.innerHTML = chats.map(c => `
+      <div class="chat-item ${c.id === currentChatId ? "active" : ""}"
+           onclick="AlfaGen.switchChat('${c.id}')">
+        <span class="dot"></span><span>${escapeHtml(c.title)}</span>
+      </div>
+    `).join("");
+  }
+
+  // ── Messages rendering ───────────────────────────────────────────
+  function renderMessages(){
+    const el = document.getElementById("messages");
+    const chat = getCurrentChat();
+    if(!chat || chat.messages.length === 0){
+      el.innerHTML = `
+        <div class="msg-welcome">
+          <div class="logo" style="width:56px; height:56px; border-radius:14px; font-size:28px; margin:0 auto">A</div>
+          <h2>Чем могу помочь?</h2>
+          <p>Спросите про модели, процесс получения доступа, оформление дефектов или попробуйте RAG с вашими документами.</p>
+          <div class="suggestions">
+            <div class="suggestion" onclick="AlfaGen.useSuggestion('Как получить доступ к AlfaGen Sandbox?')">
+              <strong>Получение доступа</strong>
+              <span>Как запросить токен и какие ограничения</span>
+            </div>
+            <div class="suggestion" onclick="AlfaGen.useSuggestion('Какую модель выбрать для анализа скриншотов UI?')">
+              <strong>Выбор модели</strong>
+              <span>Когда что использовать</span>
+            </div>
+            <div class="suggestion" onclick="AlfaGen.useSuggestion('Оформи найденный мной дефект в виде ГОСТ: кнопка «Подтвердить» не работает')">
+              <strong>Оформить дефект по ГОСТ</strong>
+              <span>Заголовок, шаги, ожидаемый результат</span>
+            </div>
+            <div class="suggestion" onclick="AlfaGen.useSuggestion('Как пользоваться RAG и зачем он нужен?')">
+              <strong>RAG и документы</strong>
+              <span>Загрузка файлов, ответы со ссылками</span>
+            </div>
+          </div>
+        </div>`;
       return;
     }
-    list.innerHTML = uploadedFiles.map((f, i) => `
-      <div class="file-pill ${f.attached ? 'active' : ''}" style="cursor:pointer;" onclick="window.__toggleAttach(${i})">
-        📄 ${f.name} · ${(f.size/1024).toFixed(1)} KB · ${f.attached ? "✓ в чате" : "прикрепить"}
-      </div>
-    `).join("");
-    chatFiles.innerHTML = uploadedFiles
-      .filter((f) => f.attached)
-      .map((f) => `<span class="file-pill active">📄 ${f.name}</span>`)
-      .join("");
+    el.innerHTML = chat.messages.map(m => {
+      const name = m.role === "user" ? "Вы" : "AlfaGen";
+      const avatar = m.role === "user" ? "В" : "A";
+      const body = m.pending
+        ? `<div class="typing-dots"><span></span><span></span><span></span></div>`
+        : renderMarkdown(m.content);
+      const attach = m.attachments?.length ? `
+        <div class="msg-attachments">
+          ${m.attachments.map(a => `<span class="attachment-chip">📎 ${escapeHtml(a.name)}</span>`).join("")}
+        </div>` : "";
+      return `
+        <div class="msg ${m.role}">
+          <div class="msg-avatar">${avatar}</div>
+          <div class="msg-body">
+            <div class="msg-role">${name}</div>
+            <div class="msg-content">${body}</div>
+            ${attach}
+          </div>
+        </div>`;
+    }).join("");
+    el.scrollTop = el.scrollHeight;
   }
 
-  window.__toggleAttach = (idx) => {
-    uploadedFiles[idx].attached = !uploadedFiles[idx].attached;
-    renderFiles();
-  };
-
-  // ─────────── Chat ───────────
-  function renderChatLog() {
-    const log = document.getElementById("chat-log");
-    log.innerHTML = chatHistory.filter((m) => m.role !== "system").map((m) => `
-      <div class="msg ${m.role}">
-        <div class="role">${m.role}</div>
-        <div class="content">${escapeHtml(typeof m.content === "string" ? m.content : JSON.stringify(m.content))}</div>
-      </div>
-    `).join("");
-    log.scrollTop = log.scrollHeight;
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  function useSuggestion(text){
+    const ta = document.getElementById("composer-input");
+    ta.value = text;
+    autosize(ta);
+    onInputChange();
+    send();
   }
 
-  document.getElementById("chat-send").onclick = async () => {
-    const input = document.getElementById("chat-input");
-    const btn = document.getElementById("chat-send");
-    const status = document.getElementById("chat-status");
-    const err = document.getElementById("chat-error");
-    const text = input.value.trim();
-    if (!text) return;
-
-    const userMsg = { role: "user", content: text };
-    // If files are attached, use the content-array form with file references
-    const attached = uploadedFiles.filter((f) => f.attached);
-    const messages = [...chatHistory, userMsg];
-    if (attached.length > 0) {
-      // The last user message carries files in OpenAI-compat "content array"
-      const fileBlocks = attached.map((f) => ({
-        type: "file",
-        file: { file_id: f.fileId },
-      }));
-      // Push a second user message carrying only files (matches Postman example)
-      messages.push({ role: "user", content: fileBlocks });
+  // Minimal markdown → HTML (headings, bold, italic, code, lists).
+  function renderMarkdown(src){
+    const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+    const lines = src.split("\n");
+    let out = "", inUl = false, inOl = false, inCode = false, buf = "";
+    const closeLists = () => {
+      if(inUl){ out += "</ul>"; inUl = false; }
+      if(inOl){ out += "</ol>"; inOl = false; }
+    };
+    for(const raw of lines){
+      if(raw.startsWith("```")){
+        if(inCode){ out += `<pre>${esc(buf)}</pre>`; buf = ""; inCode = false; }
+        else { closeLists(); inCode = true; }
+        continue;
+      }
+      if(inCode){ buf += (buf ? "\n" : "") + raw; continue; }
+      const m = raw.match(/^(\d+)\.\s+(.*)$/);
+      const u = raw.match(/^[-*]\s+(.*)$/);
+      if(u){
+        if(inOl){ out += "</ol>"; inOl = false; }
+        if(!inUl){ out += "<ul>"; inUl = true; }
+        out += `<li>${inline(u[1])}</li>`;
+        continue;
+      }
+      if(m){
+        if(inUl){ out += "</ul>"; inUl = false; }
+        if(!inOl){ out += "<ol>"; inOl = true; }
+        out += `<li>${inline(m[2])}</li>`;
+        continue;
+      }
+      closeLists();
+      if(raw.trim() === ""){ out += ""; continue; }
+      if(raw.startsWith("### ")){ out += `<p><strong>${inline(raw.slice(4))}</strong></p>`; continue; }
+      out += `<p>${inline(raw)}</p>`;
     }
-    chatHistory.push(userMsg);
-    input.value = "";
-    renderChatLog();
-    btn.disabled = true;
-    status.textContent = "Ждём модель…";
-    err.innerHTML = "";
+    closeLists();
+    if(inCode){ out += `<pre>${esc(buf)}</pre>`; }
+    return out;
+
+    function inline(s){
+      return esc(s)
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\b_([^_]+)_\b/g, "<em>$1</em>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+  }
+
+  // ── Send message ─────────────────────────────────────────────────
+  function onInputChange(){
+    const v = document.getElementById("composer-input").value.trim();
+    document.getElementById("send-btn").disabled = !v || sending;
+  }
+  function onKey(ev){
+    if(ev.key === "Enter" && !ev.shiftKey){
+      ev.preventDefault();
+      if(!sending) send();
+    }
+  }
+  function autosize(el){
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    onInputChange();
+  }
+
+  async function send(){
+    const ta = document.getElementById("composer-input");
+    const text = ta.value.trim();
+    if(!text || sending) return;
+    sending = true;
+    onInputChange();
+
+    const chat = getCurrentChat();
+    const readyFiles = stagedFiles.filter(f => f.done);
+    const userMsg = {
+      role:"user", content:text,
+      attachments: readyFiles.map(f => ({name:f.name})),
+    };
+    chat.messages.push(userMsg);
+
+    // Auto-title from first message
+    if(chat.messages.filter(m => m.role === "user").length === 1){
+      chat.title = text.length > 40 ? text.slice(0, 40) + "…" : text;
+      document.getElementById("chat-title").textContent = chat.title;
+      renderChatList();
+    }
+
+    // Clear composer
+    ta.value = "";
+    autosize(ta);
+    stagedFiles = stagedFiles.filter(f => !f.done);  // consume attached files
+    renderStaged();
+
+    // Pending assistant message
+    const pending = { role:"assistant", content:"", pending:true };
+    chat.messages.push(pending);
+    renderMessages();
 
     try {
-      const body = {
-        model: document.getElementById("chat-model").value,
-        messages,
-        n: 1,
-      };
-      const data = await alfa("/chat", { method: "POST", body });
-      const reply = data?.choices?.[0]?.message?.content || "(пусто)";
-      chatHistory.push({ role: "assistant", content: reply });
-      renderChatLog();
+      let reply;
+      if(!demoMode){
+        const res = await fetch(`${api}/api/apps/builtins/alfagen/chat`, {
+          method:"POST",
+          headers:{
+            Authorization:`Bearer ${token}`,
+            "Content-Type":"application/json",
+          },
+          body: JSON.stringify({
+            model: currentModel,
+            messages: chat.messages.filter(m => !m.pending).map(m => ({
+              role:m.role, content:m.content,
+            })),
+          }),
+        });
+        const j = await res.json();
+        reply = j.choices?.[0]?.message?.content
+             ?? j.content
+             ?? "Пустой ответ от модели.";
+      } else {
+        await sleep(400);  // pretend latency
+        reply = pickReply(text);
+      }
+      await streamInto(pending, reply);
     } catch (e) {
-      err.innerHTML = `<div class="error">${e.message}</div>`;
+      pending.pending = false;
+      pending.content = "**Ошибка:** не удалось получить ответ. Проверьте подключение и токен в настройках установки.";
     } finally {
-      btn.disabled = false;
-      status.textContent = "";
+      pending.pending = false;
+      sending = false;
+      onInputChange();
+      renderMessages();
     }
-  };
+  }
 
-  document.getElementById("chat-clear").onclick = () => {
-    chatHistory.length = 0;
-    renderChatLog();
+  async function streamInto(msg, fullText){
+    // Fake streaming — reveals the reply one chunk at a time so the
+    // demo feels alive. Real API does SSE; when we flip to real we'll
+    // replace this with a proper reader.
+    msg.pending = false;
+    msg.content = "";
+    const chunks = fullText.match(/.{1,14}/gs) ?? [fullText];
+    for(const ch of chunks){
+      msg.content += ch;
+      renderMessages();
+      await sleep(18);
+    }
+  }
+
+  // ── Files ────────────────────────────────────────────────────────
+  function attachClick(){ document.getElementById("file-picker").click(); }
+
+  function onFilePicked(input){
+    for(const f of input.files){
+      if(f.size > 20 * 1024 * 1024){
+        alert(`Файл ${f.name} больше 20 МБ — не принимается.`);
+        continue;
+      }
+      const id = "f" + Date.now() + Math.random().toString(36).slice(2, 5);
+      const entry = { id, name:f.name, size:f.size, progress:0, done:false,
+                      chunks: Math.ceil(f.size / (64 * 1024)) };
+      stagedFiles.push(entry);
+      renderFiles();
+      renderStaged();
+      fakeUpload(entry);
+    }
+    input.value = "";
+  }
+
+  async function fakeUpload(entry){
+    // Simulate the SSE progress stream. Real flow does upload + SSE.
+    const steps = 20 + Math.floor(Math.random() * 30);
+    for(let i = 0; i <= steps; i++){
+      entry.progress = Math.round((i / steps) * 100);
+      renderFiles();
+      await sleep(80 + Math.random() * 60);
+    }
+    entry.done = true;
+    renderFiles();
+    renderStaged();
+  }
+
+  function renderFiles(){
+    const el = document.getElementById("file-list");
+    if(stagedFiles.length === 0){
+      el.innerHTML = `<div style="text-align:center; padding:40px; color:var(--muted)">Файлов пока нет</div>`;
+      return;
+    }
+    el.innerHTML = stagedFiles.map(f => `
+      <div class="file-row">
+        <div class="file-icon">${fileBadge(f.name)}</div>
+        <div class="file-meta">
+          <strong>${escapeHtml(f.name)}</strong>
+          <span>${formatSize(f.size)} · ${f.chunks} чанков</span>
+        </div>
+        <div class="file-progress">
+          <div class="progress-bar"><div class="progress-fill" style="width:${f.progress}%"></div></div>
+          <div class="progress-text">${f.done ? "✓ Готов к использованию" : `${f.progress}%`}</div>
+        </div>
+        <button class="icon" onclick="AlfaGen.removeFile('${f.id}')" title="Удалить">✕</button>
+      </div>
+    `).join("");
+  }
+
+  function renderStaged(){
+    const el = document.getElementById("staged-files");
+    const ready = stagedFiles.filter(f => f.done);
+    const note = document.getElementById("context-note");
+    if(ready.length === 0){
+      el.innerHTML = "";
+      note.textContent = stagedFiles.length
+        ? `Загружается ${stagedFiles.length} файлов…`
+        : "Прикреплённых файлов нет";
+      return;
+    }
+    el.innerHTML = ready.map(f =>
+      `<span class="attachment-chip">📎 ${escapeHtml(f.name)}
+         <button class="icon" style="width:18px;height:18px; margin-left:4px; color:#0958d9"
+           onclick="AlfaGen.removeFile('${f.id}')">✕</button>
+       </span>`
+    ).join("");
+    note.textContent = `Прикреплено к следующему сообщению: ${ready.length} ${plural(ready.length, ["файл","файла","файлов"])}`;
+  }
+
+  function removeFile(id){
+    stagedFiles = stagedFiles.filter(f => f.id !== id);
+    renderFiles(); renderStaged();
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  function fileBadge(n){
+    const ext = (n.split(".").pop() || "").toLowerCase();
+    if(["pdf"].includes(ext)) return "PDF";
+    if(["doc","docx"].includes(ext)) return "DOC";
+    if(["txt","md"].includes(ext)) return "TXT";
+    return "·";
+  }
+  function formatSize(n){
+    if(n < 1024) return `${n} Б`;
+    if(n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`;
+    return `${(n / (1024 * 1024)).toFixed(1)} МБ`;
+  }
+  function plural(n, f){
+    const m10 = n % 10, m100 = n % 100;
+    if(m100 >= 11 && m100 <= 14) return f[2];
+    if(m10 === 1) return f[0];
+    if(m10 >= 2 && m10 <= 4) return f[1];
+    return f[2];
+  }
+  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function escapeAttr(s){ return escapeHtml(s).replace(/"/g, "&quot;"); }
+
+  // Drag & drop
+  document.addEventListener("DOMContentLoaded", () => {
+    const dz = document.getElementById("dropzone");
+    ["dragenter","dragover"].forEach(ev =>
+      dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
+    ["dragleave","drop"].forEach(ev =>
+      dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
+    dz.addEventListener("drop", e => {
+      for(const f of e.dataTransfer.files){
+        const input = document.getElementById("file-picker");
+        const dt = new DataTransfer(); dt.items.add(f);
+        input.files = dt.files;
+        onFilePicked(input);
+        break;
+      }
+    });
+    init();
+  });
+
+  return {
+    newChat, switchChat, showView, setModel,
+    send, onKey, autosize, useSuggestion,
+    attachClick, onFilePicked, removeFile,
   };
+})();
 </script>
 </body>
 </html>

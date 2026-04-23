@@ -18,6 +18,8 @@ class ProfileRead(BaseModel):
     is_active: bool
     is_verified: bool
     must_change_password: bool
+    # Relative path under ``app_uploads_dir``. None = use default circle.
+    avatar_path: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):

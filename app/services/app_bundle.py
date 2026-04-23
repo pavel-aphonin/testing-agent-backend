@@ -35,6 +35,7 @@ class ExtractedBundle:
     bundle_dir: Path          # absolute
     bundle_relpath: str       # relative to app_uploads_dir (for DB)
     logo_relpath: str | None  # relative to app_uploads_dir
+    cover_relpath: str | None
     size_bytes: int
 
 
@@ -87,6 +88,7 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
             # Extract files, strip the wrapping folder prefix if present,
             # refuse any entry that would escape the target dir.
             logo_rel: str | None = None
+            cover_rel: str | None = None
             screenshots: list[str] = []
             for info in zf.infolist():
                 name = info.filename
@@ -104,6 +106,8 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
 
                 if Path(name).name in ("logo.png", "logo.jpg", "logo.jpeg", "logo.svg"):
                     logo_rel = f"{BUNDLES_SUBDIR}/{manifest_obj.code}/{manifest_obj.version}/{name}"
+                if Path(name).name in ("cover.png", "cover.jpg", "cover.jpeg", "cover.webp"):
+                    cover_rel = f"{BUNDLES_SUBDIR}/{manifest_obj.code}/{manifest_obj.version}/{name}"
                 # Auto-discover screenshots from the screenshots/ folder.
                 parts = Path(name).parts
                 if parts and parts[0] == "screenshots":
@@ -143,6 +147,7 @@ def extract_and_validate(zip_bytes: bytes) -> ExtractedBundle:
                 bundle_dir=target_dir,
                 bundle_relpath=f"{BUNDLES_SUBDIR}/{manifest_obj.code}/{manifest_obj.version}",
                 logo_relpath=logo_rel,
+                cover_relpath=cover_rel,
                 size_bytes=size_bytes,
             )
     finally:

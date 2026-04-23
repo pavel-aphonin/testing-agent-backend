@@ -18,6 +18,7 @@ from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
 from app.models.reference import (
     RefActionType,
+    RefAppCategory,
     RefDeviceType,
     RefOsVersion,
     RefPlatform,
@@ -63,6 +64,12 @@ class TestDataTypeRead(_RefBase):
     is_system: bool = True
 
 
+class AppCategoryRead(_RefBase):
+    icon: str | None = None
+    sort_order: int = 0
+    is_system: bool = False
+
+
 class _CreateBase(BaseModel):
     code: str
     name: str
@@ -88,6 +95,11 @@ class ActionTypeCreate(_CreateBase):
 
 class TestDataTypeCreate(_CreateBase):
     pass
+
+
+class AppCategoryCreate(_CreateBase):
+    icon: str | None = None
+    sort_order: int = 0
 
 
 # ── List endpoints (open to any user) ────────────────────────────────────────
@@ -155,14 +167,36 @@ async def list_test_data_types(
     return list(r.scalars().all())
 
 
+@router.get("/app-categories", response_model=list[AppCategoryRead])
+async def list_app_categories(
+    _u: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    active_only: bool = False,
+):
+    q = select(RefAppCategory)
+    if active_only:
+        q = q.where(RefAppCategory.is_active.is_(True))
+    q = q.order_by(RefAppCategory.sort_order, RefAppCategory.name)
+    r = await session.execute(q)
+    return list(r.scalars().all())
+
+
 # ── Generic mutation handler factory ─────────────────────────────────────────
 # Admin CRUD for each ref table is largely identical. Factories below
 # build the routes to avoid 200+ lines of copy-paste.
 
 def _make_admin_routes(model, prefix: str, create_schema, read_schema):
-    @router.post(f"/{prefix}", response_model=read_schema, status_code=201)
+    # With ``from __future__ import annotations`` all type hints become
+    # strings at function-definition time. FastAPI's OpenAPI generator
+    # tries to resolve ``"create_schema"`` and fails because that's a
+    # local variable of this factory, not a module-level symbol — which
+    # used to silently work until /openapi.json got exercised by the
+    # new Settings → API tab. Fix: rewrite the annotation with the real
+    # class object immediately after defining the function, so FastAPI
+    # reads the actual Pydantic model via ``get_type_hints`` / direct
+    # ``__annotations__`` access.
     async def _create(
-        payload: create_schema,
+        payload,  # annotation patched below
         _u: Annotated[User, Depends(require_permission("dictionaries.create"))],
         session: Annotated[AsyncSession, Depends(get_async_session)],
     ):
@@ -174,6 +208,9 @@ def _make_admin_routes(model, prefix: str, create_schema, read_schema):
         await session.commit()
         await session.refresh(obj)
         return obj
+
+    _create.__annotations__["payload"] = create_schema
+    router.post(f"/{prefix}", response_model=read_schema, status_code=201)(_create)
 
     @router.patch(f"/{prefix}/{{item_id}}", response_model=read_schema)
     async def _update(
@@ -201,8 +238,38 @@ def _make_admin_routes(model, prefix: str, create_schema, read_schema):
         obj = await session.get(model, item_id)
         if obj is None:
             raise HTTPException(404, "Not found")
+
+        # App categories have special delete semantics: we allow removing
+        # even the system-seeded rows if nothing uses them. The referenced
+        # check queries AppPackage.category against this row's code — any
+        # hit means some package in the catalog points at this category
+        # and we'd leave it orphaned.
+        if model is RefAppCategory:
+            from app.models.app_package import AppPackage
+            q = await session.execute(
+                select(AppPackage.id, AppPackage.name)
+                .where(AppPackage.category == obj.code)
+                .limit(5)
+            )
+            using = q.all()
+            if using:
+                names = ", ".join(f"«{n}»" for _, n in using[:3])
+                more = "" if len(using) < 4 else f" и ещё {len(using) - 3}"
+                raise HTTPException(
+                    409,
+                    (
+                        f"Нельзя удалить категорию — её используют приложения: "
+                        f"{names}{more}. Сначала переведите их в другую "
+                        f"категорию или удалите сами приложения."
+                    ),
+                )
+            # No references → category can go even if it was a system seed.
+            await session.delete(obj)
+            await session.commit()
+            return
+
         if hasattr(obj, "is_system") and obj.is_system:
-            raise HTTPException(400, "System entries cannot be deleted")
+            raise HTTPException(400, "Системные записи нельзя удалить")
         await session.delete(obj)
         await session.commit()
 
@@ -212,6 +279,7 @@ _make_admin_routes(RefOsVersion, "os-versions", OsVersionCreate, OsVersionRead)
 _make_admin_routes(RefDeviceType, "device-types", DeviceTypeCreate, DeviceTypeRead)
 _make_admin_routes(RefActionType, "action-types", ActionTypeCreate, ActionTypeRead)
 _make_admin_routes(RefTestDataType, "test-data-types", TestDataTypeCreate, TestDataTypeRead)
+_make_admin_routes(RefAppCategory, "app-categories", AppCategoryCreate, AppCategoryRead)
 
 
 # ── Workspace action settings ────────────────────────────────────────────────

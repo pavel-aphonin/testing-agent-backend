@@ -73,3 +73,24 @@ class WorkspaceActionSetting(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), index=True, nullable=False)
     action_type_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), index=True, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class RefAppCategory(Base):
+    """Categories displayed in the app store filter chips + on app cards.
+
+    Admin-curated — used to be hardcoded in the frontend (``integration``,
+    ``automation``, etc). Putting them in a table lets ops rename, add,
+    disable, or reorder without a deploy. ``icon`` is a free-form emoji or
+    icon name consumed by the frontend; ``sort_order`` controls chip order.
+    """
+
+    __tablename__ = "ref_app_categories"
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # System rows (seeded on install) cannot be deleted via the admin
+    # UI — the reference-CRUD factory already honours this flag.
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
