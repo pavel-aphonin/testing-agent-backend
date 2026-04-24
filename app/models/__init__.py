@@ -16,6 +16,14 @@ from app.models.custom_dictionary import (
     CustomDictionaryItem,
     CustomDictionaryPermission,
 )
+from app.models.dashboard import (
+    Dashboard,
+    DashboardPermission,
+    DashboardPermissionLevel,
+    DashboardWidget,
+    WidgetPackage,
+    WidgetTemplate,
+)
 from app.models.defect import DefectKind, DefectModel, DefectPriority
 from app.models.device_config import DeviceConfig
 from app.models.help import (

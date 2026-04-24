@@ -206,6 +206,35 @@ async def create_workspace(
             role=WsRole.OWNER.value,
         )
         session.add(member)
+        # Auto-create the system dashboard + its starter widgets. Kept
+        # inline instead of a SQLAlchemy event hook because we want the
+        # creation to be part of the same transaction — if the dashboard
+        # insert fails, the workspace insert should roll back too.
+        from app.models.dashboard import Dashboard, DashboardWidget
+        sys_dash = Dashboard(
+            workspace_id=ws.id,
+            name=ws.name,
+            icon="📊",
+            is_system=True,
+            sort_order=0,
+        )
+        session.add(sys_dash)
+        await session.flush()
+        _STARTER = [
+            ("pie", "Запуски по статусам", "runs.by_status", None, 0, 0, 6, 4),
+            ("donut", "Дефекты по приоритетам", "defects.by_priority", None, 6, 0, 6, 4),
+            ("line", "Запуски за последние 14 дней", "runs.by_day", {"days": 14}, 0, 4, 12, 4),
+            ("table", "Последние запуски", "runs.recent", {"limit": 10}, 0, 8, 12, 5),
+        ]
+        for (wt, title, code, params, x, y, w, h) in _STARTER:
+            session.add(DashboardWidget(
+                dashboard_id=sys_dash.id,
+                widget_type=wt,
+                title=title,
+                datasource_code=code,
+                datasource_params=params,
+                grid_x=x, grid_y=y, grid_w=w, grid_h=h,
+            ))
     await session.commit()
     await session.refresh(ws)
     return ws

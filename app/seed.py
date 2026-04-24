@@ -416,6 +416,270 @@ async def seed_help_articles() -> None:
         await session.commit()
 
 
+async def seed_demo_dashboard_data() -> None:
+    """Populate a workspace with believable runs / screens / edges /
+    defects so the default dashboard has something to draw.
+
+    Idempotent: if the target workspace already has 20+ runs, skip —
+    assume the user's real activity is filling things in and we don't
+    want to fight it. Otherwise top up to ~60 varied runs across the
+    past 14 days.
+
+    Kept in the main seed module because it's "day-one" data, not
+    something an admin needs to toggle on/off.
+    """
+    import hashlib
+    import random
+    import uuid as _uuid
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    # Deterministic pseudo-random — reruns are reproducible if someone
+    # truncates and resets. Same seed = same shape.
+    rng = random.Random(20260424)
+
+    async with async_session_maker() as session:
+        ws_q = await session.execute(
+            text("SELECT id, name, created_by_user_id FROM workspaces LIMIT 1")
+        )
+        ws_row = ws_q.first()
+        if ws_row is None:
+            return
+        ws_id, ws_name, ws_creator = ws_row
+
+        count_q = await session.execute(
+            text("SELECT COUNT(*) FROM runs WHERE workspace_id = :ws"),
+            {"ws": str(ws_id)},
+        )
+        existing = int(count_q.scalar() or 0)
+        if existing >= 20:
+            return  # real data already present
+
+        print(f"[seed] Generating demo dashboard data for {ws_name!r} "
+              f"(had {existing} runs → top up to 60)")
+
+        # We need a real user_id FK. Fall back to the first user row
+        # if the workspace's creator got nulled.
+        user_q = await session.execute(text("SELECT id FROM users LIMIT 1"))
+        user_id = ws_creator or user_q.scalar_one()
+
+        # Catalogue of fake-but-plausible values. Same vocabulary the
+        # real iOS executor would produce.
+        BUNDLES = [
+            ("ru.alfa.mobile",              "iOS",      "iPhone 17 Pro Max"),
+            ("ru.alfa.mobile",              "iOS",      "iPhone 16"),
+            ("ru.alfa.mobile",              "iOS",      "iPad Pro 13"),
+            ("ru.alfa.investments",         "iOS",      "iPhone 17 Pro Max"),
+            ("ru.alfa.business",            "Android",  "Pixel 9 Pro XL"),
+            ("ru.alfa.business",            "Android",  "Pixel 8"),
+            ("org.reactjs.native.TestApp",  "iOS",      "iPhone 17 Pro Max"),
+        ]
+        MODES = ["hybrid", "ai", "mc"]
+        MODE_WEIGHTS = [0.6, 0.25, 0.15]
+        # Status weights: most runs complete, some fail, a few cancel, and
+        # a live "running" or two for "feels alive" flavor.
+        STATUS_WEIGHTS = [
+            ("completed", 0.75),
+            ("failed",    0.12),
+            ("cancelled", 0.08),
+            ("running",   0.03),
+            ("pending",   0.02),
+        ]
+        SCREEN_NAMES = [
+            "Login", "MainFeed", "Account", "Transfers", "TransferForm",
+            "Cards", "CardDetails", "Payments", "PaymentMethods",
+            "History", "HistoryFilter", "Chat", "Support", "Settings",
+            "Profile", "Security", "Notifications", "About", "Onboarding1",
+            "Onboarding2", "Onboarding3", "SignUp", "ForgotPassword",
+            "OtpCode", "Biometry", "TermsAndConditions", "SearchResults",
+        ]
+        ACTION_TYPES = ["tap", "tap", "tap", "input", "swipe", "long_press"]
+        DEFECT_KINDS = [
+            "crash", "validation", "a11y", "performance", "visual", "network",
+        ]
+        DEFECT_PRIORITIES = ["P0", "P1", "P2", "P3"]
+        DEFECT_PRIORITY_WEIGHTS = [0.05, 0.25, 0.45, 0.25]
+        DEFECT_TITLES_BY_KIND = {
+            "crash":       ["Crash при нажатии на кнопку «Войти»",
+                            "NullPointerException в истории операций",
+                            "Приложение закрывается на экране onboarding"],
+            "validation":  ["Поле «Сумма» принимает отрицательные значения",
+                            "Телефон не проверяется на формат",
+                            "Пустой email проходит валидацию"],
+            "a11y":        ["VoiceOver не читает кнопку «Далее»",
+                            "Контраст текста ниже WCAG AA",
+                            "Отсутствует hint у иконки-фильтра"],
+            "performance": ["Скролл истории лагает на iOS 17",
+                            "Главный экран грузится > 3 секунд",
+                            "Переход между вкладками с задержкой 500ms"],
+            "visual":      ["Обрезан текст кнопки на маленьком экране",
+                            "Кнопка «Подтвердить» наезжает на поле ввода",
+                            "Неправильный цвет статуса операции"],
+            "network":     ["Нет обработки таймаута запроса",
+                            "ERR_NETWORK при смене Wi-Fi на LTE",
+                            "Бесконечный спиннер при ошибке 500"],
+        }
+
+        def _weighted(choices: list[tuple]) -> str:
+            vals = [c[0] for c in choices]
+            weights = [c[1] for c in choices]
+            return rng.choices(vals, weights=weights)[0]
+
+        def _hash(s: str) -> str:
+            return hashlib.sha256(s.encode()).hexdigest()[:16]
+
+        now = datetime.now(timezone.utc)
+
+        target_count = 60
+        created_runs = 0
+        for i in range(target_count - existing):
+            bundle, platform, device = rng.choice(BUNDLES)
+            mode = rng.choices(MODES, MODE_WEIGHTS)[0]
+            status = _weighted(STATUS_WEIGHTS)
+            # Spread over past 14 days, with a weekday bias (more
+            # activity Mon-Thu) so the timeline has shape.
+            days_ago = rng.choices(
+                list(range(14)),
+                weights=[1.0, 1.2, 1.4, 1.3, 1.0, 0.6, 0.5,  # w-1
+                         1.0, 1.2, 1.4, 1.3, 1.0, 0.6, 0.5], # w-0
+            )[0]
+            hour = rng.choices(
+                list(range(24)),
+                weights=[0.1, 0.1, 0.05, 0.05, 0.05, 0.1, 0.2, 0.4,
+                         0.8, 1.2, 1.5, 1.6, 1.4, 1.3, 1.4, 1.3,
+                         1.1, 0.9, 0.6, 0.4, 0.3, 0.25, 0.2, 0.15],
+            )[0]
+            minute = rng.randint(0, 59)
+            started = now - timedelta(days=days_ago, hours=now.hour - hour,
+                                      minutes=now.minute - minute)
+            duration_sec = None
+            if status in ("completed", "failed", "cancelled"):
+                # Completed: 2-15 min; failed: shorter; cancelled: any.
+                if status == "completed":
+                    duration_sec = rng.randint(120, 900)
+                elif status == "failed":
+                    duration_sec = rng.randint(30, 400)
+                else:
+                    duration_sec = rng.randint(10, 600)
+            finished = (
+                started + timedelta(seconds=duration_sec)
+                if duration_sec is not None else None
+            )
+            created = started - timedelta(seconds=rng.randint(1, 5))
+
+            run_id = str(_uuid.uuid4())
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO runs
+                    (id, user_id, bundle_id, device_id, platform, mode,
+                     max_steps, c_puct, rollout_depth, status, created_at,
+                     started_at, finished_at, pbt_enabled, workspace_id,
+                     title, device_type)
+                    VALUES
+                    (cast(:id as uuid), cast(:uid as uuid),
+                     :bundle, :device, :platform, :mode,
+                     :maxs, :cp, :rd, :status, :created,
+                     :started, :finished, false, cast(:ws as uuid),
+                     :title, :dtype)
+                    """
+                ),
+                {
+                    "id": run_id, "uid": str(user_id), "bundle": bundle,
+                    "device": f"{device} · demo",
+                    "platform": platform.lower(), "mode": mode,
+                    "maxs": rng.choice([100, 200, 500]),
+                    "cp": 1.4, "rd": rng.choice([3, 5, 8]),
+                    "status": status, "created": created,
+                    "started": started, "finished": finished,
+                    "ws": str(ws_id),
+                    "title": f"{bundle.split('.')[-1].title()} · {mode}",
+                    "dtype": device,
+                },
+            )
+
+            # Screens: 10-35 per run, with overlap in names so hashes
+            # repeat across runs (the same physical screen in many runs).
+            nscreens = rng.randint(10, 35)
+            screen_hashes: list[str] = []
+            picked = rng.sample(SCREEN_NAMES, min(nscreens, len(SCREEN_NAMES)))
+            for j, name in enumerate(picked):
+                h = _hash(f"{bundle}:{name}")
+                screen_hashes.append(h)
+                first_seen = started + timedelta(seconds=rng.randint(1, 300))
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO screens
+                        (run_id, screen_id_hash, name, visit_count, first_seen_at)
+                        VALUES (cast(:r as uuid), :h, :n, :v, :fs)
+                        """
+                    ),
+                    {"r": run_id, "h": h, "n": name,
+                     "v": rng.randint(1, 6), "fs": first_seen},
+                )
+
+            # Edges: 1.5-3× screens, connecting random source→target.
+            nedges = int(nscreens * rng.uniform(1.5, 3.0))
+            for step in range(nedges):
+                src = rng.choice(screen_hashes)
+                tgt = rng.choice(screen_hashes)
+                act = rng.choice(ACTION_TYPES)
+                success = rng.random() > 0.08  # 92% success rate
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO edges
+                        (run_id, source_screen_hash, target_screen_hash,
+                         action_type, success, step_idx, created_at)
+                        VALUES (cast(:r as uuid), :s, :t, :a, :ok, :i, :c)
+                        """
+                    ),
+                    {"r": run_id, "s": src, "t": tgt, "a": act,
+                     "ok": success, "i": step,
+                     "c": started + timedelta(seconds=step * 3 + 1)},
+                )
+
+            # Defects: 0-5, skewed toward a handful of noisy runs (some
+            # runs find nothing, a few find many — matches real life).
+            # Failed runs have a higher chance of defects.
+            base_prob = 0.6 if status in ("completed",) else 0.9 if status == "failed" else 0.3
+            if rng.random() < base_prob:
+                ndef = rng.choices([1, 2, 3, 5], weights=[0.5, 0.3, 0.15, 0.05])[0]
+                for _ in range(ndef):
+                    kind = rng.choice(DEFECT_KINDS)
+                    prio = rng.choices(DEFECT_PRIORITIES, DEFECT_PRIORITY_WEIGHTS)[0]
+                    title = rng.choice(DEFECT_TITLES_BY_KIND[kind])
+                    screen_name = rng.choice(picked)
+                    screen_hash = _hash(f"{bundle}:{screen_name}")
+                    created_at = started + timedelta(seconds=rng.randint(10, duration_sec or 60))
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO defects
+                            (id, run_id, step_idx, screen_id_hash, screen_name,
+                             priority, kind, title, description, created_at)
+                            VALUES (cast(:id as uuid), cast(:r as uuid),
+                                    :step, :sh, :sn, :p, :k, :t, :d, :c)
+                            """
+                        ),
+                        {
+                            "id": str(_uuid.uuid4()), "r": run_id,
+                            "step": rng.randint(1, max(1, nedges - 1)),
+                            "sh": screen_hash, "sn": screen_name,
+                            "p": prio, "k": kind, "t": title,
+                            "d": f"{title}. Обнаружено автоматическим обходом (demo).",
+                            "c": created_at,
+                        },
+                    )
+            created_runs += 1
+
+        await session.commit()
+        print(f"[seed] Demo data generated: {created_runs} runs, "
+              f"plus screens / edges / defects")
+
+
 async def seed_release_notes() -> None:
     """Seed product changelog. Idempotent — skip versions we already have.
 
@@ -426,6 +690,91 @@ async def seed_release_notes() -> None:
     from app.models.release_note import ReleaseNote
 
     notes = [
+        {
+            "version": "0.6.0",
+            "title": "Дашборды, KPI-виджеты и пакеты",
+            "excerpt": "Stat/Progress/Sparkline, стек-бары, экспорт CSV/JSON, drill-down, auto-refresh и пользовательские пакеты виджетов в iframe.",
+            "released_at": _dt(2026, 4, 24, 0, 0, tzinfo=_tz.utc),
+            "body_md": (
+                "## Что нового\n\n"
+                "Этот релиз — большой шаг по дашбордам. Теперь на дашборд "
+                "можно поставить не только график из ApexCharts, но и "
+                "«карточные» виджеты, стековые бары, и даже собственный "
+                "HTML+JS в песочнице.\n\n"
+                "### 📊 Новые типы виджетов\n\n"
+                "- **KPI (stat)** — одно большое число с трендом (стрелка "
+                "вверх/вниз + процент изменения). Настраиваются `unit`, "
+                "`precision`, «хорошее направление» (рост или падение), "
+                "база сравнения (предыдущее значение или первое в ряду).\n"
+                "- **Прогресс (progress)** — кольцо / дашборд / полоса к "
+                "цели. Задаются `target`, `unit`, `strokeColor`.\n"
+                "- **Спарклайн (sparkline)** — компактная линия тренда без "
+                "осей, сетки и легенды. Ставится рядом с KPI для визуальной "
+                "«кардиограммы».\n\n"
+                "### 🧩 Пакеты виджетов (custom)\n\n"
+                "На странице **Пакеты виджетов** можно загрузить полноценный "
+                "HTML+JS и использовать его на дашборде как виджет типа "
+                "`custom`. Пакет рендерится в sandbox-iframe (`allow-scripts` "
+                "только) и получает данные через `postMessage`. Доступа к "
+                "куки и API у пакета нет — всё, что ему нужно, ему отдаёт "
+                "родительский дашборд. Есть пример «большое число» из "
+                "коробки — скопируйте и правьте под свои нужды.\n\n"
+                "### 🗂 Новые источники данных\n\n"
+                "- `runs.by_day_by_status` — мультисерия по статусам (ложится "
+                "на stacked bar)\n"
+                "- `runs.by_day_by_mode` — AI / MC / Hybrid по дням\n"
+                "- `defects.by_day_by_priority` — дефекты по приоритетам во "
+                "времени\n\n"
+                "### ⚙️ Экспресс-настройки\n\n"
+                "В настройках виджета появились галочки и поля, которые "
+                "раньше пришлось бы писать в JSON:\n\n"
+                "- **Стек** — для `bar` / `barHorizontal` складывает серии "
+                "друг на друга.\n"
+                "- **Сглаженная линия** — `curve: smooth` vs `straight`.\n"
+                "- **Скрыть легенду** — если источник и так понятен.\n"
+                "- **Автообновление** — от 10 секунд. В заголовке виджета "
+                "появляется бейдж **live**. Работает только на активной "
+                "вкладке, чтобы не жрать батарею.\n"
+                "- **Ссылка-переход при клике** — переводит на страницу с "
+                "плейсхолдерами `{category}`, `{series}`, `{value}`. Пример: "
+                "`/runs?status={category}` — клик по столбцу «failed» "
+                "откроет список упавших запусков.\n\n"
+                "### 📥 Экспорт\n\n"
+                "У каждого виджета в заголовке — кнопка со скачиванием:\n\n"
+                "- **CSV** — с UTF-8 BOM, открывается в Excel без кракозябр.\n"
+                "- **JSON** — сырой `WidgetDataResponse` без служебных полей.\n\n"
+                "### 🌙 Тёмная тема — теперь везде\n\n"
+                "- Страница приложения (`/apps/:id`): markdown-описание, "
+                "ревью и заголовки читаются в тёмной теме.\n"
+                "- Магазин приложений: все карточки и чипы используют "
+                "theme tokens — никаких белых пятен.\n"
+                "- «Что нового»: и в модалке из сайдбара, и на permalink-"
+                "странице markdown-тело теперь theme-aware.\n"
+                "- Переключатель рабочих пространств в верхней панели — "
+                "теперь читаемый в тёмной теме.\n\n"
+                "### 🏷️ Цветные теги версий\n\n"
+                "В «Что нового» и на странице приложения теги версий стали "
+                "цветными:\n\n"
+                "- **Зелёный** + бейдж «актуальная» — последняя опубликованная.\n"
+                "- **Красный** + «устарела» / «не поддерживается» — старые "
+                "или явно deprecated.\n\n"
+                "### 🛠 Под капотом\n\n"
+                "- Новая модель `WidgetPackage` (миграция "
+                "`20260424_widget_pkg`) — код пакета уникален в пределах "
+                "пространства, HTML до 256 KiB.\n"
+                "- Рендер `custom`-виджета — `<iframe sandbox=\"allow-scripts\">`, "
+                "данные летят через `postMessage`. Никакого `allow-same-"
+                "origin` — песочница не имеет доступа к нашим cookies/API.\n"
+                "- `chart_options` обзавёлся служебными префиксами "
+                "`_refresh_seconds`, `_drilldown_url`, `package_id` — всё "
+                "с нижним подчёркиванием, чтобы не путать с родными "
+                "Apex-полями.\n"
+                "- `_densify_multi` — общий хелпер, который превращает "
+                "`(day, group, count)` PIVOT из БД в стандартный "
+                "`{categories, series}` payload для мультисерийных "
+                "источников."
+            ),
+        },
         {
             "version": "0.5.0",
             "title": "Аватар, навигация и расширенная палитра",

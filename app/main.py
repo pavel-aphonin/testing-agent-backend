@@ -39,6 +39,7 @@ from app.api import notification_types as notif_types_api
 from app.api import reference as reference_api
 from app.api import apps as apps_api
 from app.api import branding as branding_api
+from app.api import dashboards as dashboards_api
 from app.api import help as help_api
 from app.api import release_notes as release_notes_api
 from app.auth.users import auth_backend, fastapi_users
@@ -77,6 +78,7 @@ from app.models import (  # noqa: F401  registers all tables on Base.metadata
 from app.schemas.user import UserRead, UserUpdate
 from app.seed import (
     seed_demo_apps,
+    seed_demo_dashboard_data,
     seed_help_articles,
     seed_initial_admin,
     seed_initial_models,
@@ -114,13 +116,14 @@ async def lifespan(app: FastAPI):
     await seed_demo_apps()
     await seed_help_articles()
     await seed_release_notes()
+    await seed_demo_dashboard_data()
     yield
     await engine.dispose()
 
 
 app = FastAPI(
     title="Марков — Testing Agent API",
-    version="0.5.0",
+    version="0.6.0",
     description=(
         "HTTP API платформы «Марков». Все эндпоинты (кроме `/auth/jwt/login`) "
         "требуют JWT в заголовке `Authorization: Bearer <token>`.\n\n"
@@ -231,6 +234,7 @@ app.include_router(help_api.router)
 app.include_router(branding_api.router)
 app.include_router(release_notes_api.router)
 app.include_router(release_notes_api.admin_router)
+app.include_router(dashboards_api.router)
 
 # Static file serving for app bundles. Bundle content is public by
 # design — it's HTML/JS/CSS designed to run in a sandboxed iframe, no
