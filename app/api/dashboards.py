@@ -504,6 +504,7 @@ class WidgetTemplateRead(BaseModel):
     chart_options: dict | None
     default_w: int
     default_h: int
+    sort_order: int = 0
     created_at: datetime
 
 
@@ -529,6 +530,18 @@ class WidgetTemplateUpdate(BaseModel):
     chart_options: dict | None = None
     default_w: int | None = None
     default_h: int | None = None
+    sort_order: int | None = None
+
+
+class ReorderItem(BaseModel):
+    """One row in a reorder request: ``id`` of the entity → its new
+    sort_order value. Lower values appear first in lists."""
+    id: UUID
+    sort_order: int
+
+
+class ReorderRequest(BaseModel):
+    items: list[ReorderItem]
 
 
 @router.get(
@@ -542,12 +555,16 @@ async def list_templates(
 ) -> list[WidgetTemplate]:
     """Every template the user can see — right now "shared with this
     workspace" == "everyone in the workspace". Personal-only templates
-    can come in a later iteration via a ``scope`` column."""
+    can come in a later iteration via a ``scope`` column.
+
+    Sort: explicit ``sort_order`` (low first), then created_at as a
+    tie-breaker. Step-of-10 spacing keeps insert-between cheap.
+    """
     await _require_ws_member(session, ws_id, user)
     r = await session.execute(
         select(WidgetTemplate)
         .where(WidgetTemplate.workspace_id == ws_id)
-        .order_by(WidgetTemplate.created_at.desc())
+        .order_by(WidgetTemplate.sort_order.asc(), WidgetTemplate.created_at.desc())
     )
     return list(r.scalars().all())
 
@@ -770,6 +787,7 @@ class WidgetPackageRead(BaseModel):
     version: str
     manifest: dict
     is_active: bool
+    sort_order: int = 0
     created_at: datetime
     # html_source intentionally omitted here — it's large and only
     # needed when actually rendering a widget; fetch via GET /…/source.
@@ -802,6 +820,7 @@ class WidgetPackageUpdate(BaseModel):
     manifest: dict | None = None
     html_source: str | None = None
     is_active: bool | None = None
+    sort_order: int | None = None
 
 
 def _require_html_size(html: str) -> None:
@@ -829,7 +848,8 @@ async def list_widget_packages(
     q = select(WidgetPackage).where(WidgetPackage.workspace_id == ws_id)
     if only_active:
         q = q.where(WidgetPackage.is_active.is_(True))
-    q = q.order_by(WidgetPackage.created_at.desc())
+    # sort_order first (low = top), created_at as tie-breaker.
+    q = q.order_by(WidgetPackage.sort_order.asc(), WidgetPackage.created_at.desc())
     r = await session.execute(q)
     return list(r.scalars().all())
 
@@ -941,3 +961,73 @@ async def delete_widget_package(
     # will show "пакет удалён" rather than leaving a dangling FK.
     await session.delete(p)
     await session.commit()
+
+
+# ── Reorder helpers (PER-15) ────────────────────────────────────────────────
+
+
+async def _apply_reorder(
+    session: AsyncSession,
+    model,
+    workspace_id: UUID,
+    items: list[ReorderItem],
+) -> None:
+    """Bulk-update ``sort_order`` for a list of rows in one workspace.
+
+    All ids must belong to ``workspace_id`` — anything else is a 400
+    so cross-tenant id reshuffling can't happen even with a forged
+    payload. Single transaction; partial application is impossible.
+    """
+    if not items:
+        return
+    ids = [it.id for it in items]
+    rows = (
+        await session.execute(
+            select(model).where(
+                model.id.in_(ids),
+                model.workspace_id == workspace_id,
+            )
+        )
+    ).scalars().all()
+    found = {r.id: r for r in rows}
+    if len(found) != len(items):
+        missing = [str(it.id) for it in items if it.id not in found]
+        raise HTTPException(
+            400,
+            f"Запись не найдена или принадлежит другому пространству: {missing}",
+        )
+    for it in items:
+        found[it.id].sort_order = it.sort_order
+    await session.commit()
+
+
+@router.put(
+    "/workspaces/{ws_id}/widget-templates/reorder",
+    status_code=204,
+)
+async def reorder_widget_templates(
+    ws_id: UUID,
+    payload: ReorderRequest,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> None:
+    """Bulk-update sort_order on a workspace's widget templates."""
+    await _require_ws_member(session, ws_id, user)
+    await _apply_reorder(session, WidgetTemplate, ws_id, payload.items)
+
+
+@router.put(
+    "/workspaces/{ws_id}/widget-packages/reorder",
+    status_code=204,
+)
+async def reorder_widget_packages(
+    ws_id: UUID,
+    payload: ReorderRequest,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> None:
+    """Bulk-update sort_order on a workspace's widget packages."""
+    role = await _ws_member_role(session, ws_id, user.id)
+    if role != WsRole.MODERATOR and "users.view" not in (user.permissions or []):
+        raise HTTPException(403, "Менять порядок пакетов может только модератор")
+    await _apply_reorder(session, WidgetPackage, ws_id, payload.items)

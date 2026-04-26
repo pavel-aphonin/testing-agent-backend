@@ -166,6 +166,11 @@ class WidgetTemplate(Base):
     chart_options: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     default_w: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
     default_h: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
+    # Manual ordering inside the workspace's templates list. Lower
+    # values appear first; ties broken by created_at. Step of 10 from
+    # the seeder leaves room for inserting between siblings without
+    # rewriting every row — see 20260427_widget_sort_order migration.
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -238,6 +243,9 @@ class WidgetPackage(Base):
     # parent app. The script talks to us via window.postMessage.
     html_source: Mapped[str] = mapped_column(Text, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Same semantics as WidgetTemplate.sort_order — manual ordering
+    # inside the workspace's package list. Migration 20260427 adds it.
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
