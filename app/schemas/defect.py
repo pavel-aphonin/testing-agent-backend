@@ -24,6 +24,11 @@ class DefectRead(BaseModel):
     description: str
     screenshot_path: str | None
     external_ticket_id: str | None
+    # Raw LLM rationale stored by the worker's defect detector. Surfaced
+    # in the UI under a "Анализ модели" Collapse so reviewers can audit
+    # why the model flagged this. Optional — older detectors and the
+    # heuristic fallback don't fill it.
+    llm_analysis_json: dict | None = None
     created_at: datetime
 
 
