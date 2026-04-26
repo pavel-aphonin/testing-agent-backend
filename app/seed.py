@@ -680,6 +680,67 @@ async def seed_demo_dashboard_data() -> None:
               f"plus screens / edges / defects")
 
 
+async def seed_demo_widget_packages() -> None:
+    """Install the bundled example WidgetPackage in every workspace
+    that doesn't have it yet.
+
+    Idempotent: skip if a package with code ``example-kpi-v1`` already
+    exists in the workspace. The package itself is workspace-scoped
+    (uniqueness on (workspace_id, code)), so we walk every workspace
+    and ensure each has its own copy. ``author_user_id`` is left NULL
+    because the seeder isn't a real user.
+
+    Without this, freshly created workspaces have an empty packages
+    table and the ``custom`` widget type has nothing to point at — the
+    user has to first author HTML by hand on /widget-packages before
+    they can even add their first custom widget.
+    """
+    from sqlalchemy import select as _select
+    from app.models.dashboard import WidgetPackage
+    from app.models.workspace import Workspace
+    from app.services.widget_package_samples import (
+        EXAMPLE_KPI_HTML,
+        EXAMPLE_KPI_MANIFEST,
+    )
+
+    SAMPLE_CODE = "example-kpi-v1"
+
+    async with async_session_maker() as session:
+        ws_rows = (await session.execute(_select(Workspace))).scalars().all()
+        if not ws_rows:
+            return  # no workspaces yet — nothing to seed
+        added = 0
+        for ws in ws_rows:
+            existing = await session.execute(
+                _select(WidgetPackage).where(
+                    WidgetPackage.workspace_id == ws.id,
+                    WidgetPackage.code == SAMPLE_CODE,
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                continue
+            session.add(WidgetPackage(
+                workspace_id=ws.id,
+                author_user_id=None,
+                code=SAMPLE_CODE,
+                name="Пример: большое число (KPI)",
+                description=(
+                    "Минимальный пример пользовательского виджета. Показывает "
+                    "последнее значение первого ряда данных большим шрифтом + "
+                    "название виджета. Скопируйте и переделайте под свои нужды."
+                ),
+                icon="🧩",
+                version="0.1.0",
+                manifest=EXAMPLE_KPI_MANIFEST,
+                html_source=EXAMPLE_KPI_HTML,
+                is_active=True,
+            ))
+            added += 1
+        if added > 0:
+            await session.commit()
+            print(f"[seed] Seeded {added} demo widget package(s) ({SAMPLE_CODE})")
+
+
 async def seed_release_notes() -> None:
     """Seed product changelog. Idempotent — skip versions we already have.
 
