@@ -841,7 +841,17 @@ class WidgetPackageSource(BaseModel):
     code: str
     version: str
     manifest: dict
+    # Published HTML — what dashboards render. Use this when displaying
+    # the live widget in CustomWidget.
     html_source: str
+    # Draft (work-in-progress) edits, NULL if no draft exists. The
+    # editor on /widget-packages prefers this when filling the textarea
+    # so the author keeps editing the same draft across sessions.
+    draft_html_source: str | None = None
+    # True when draft is non-null and differs from the published copy —
+    # the UI uses this to show a "draft has unpublished changes" badge
+    # next to the publish button.
+    has_draft: bool = False
 
 
 class WidgetPackageCreate(BaseModel):
@@ -861,7 +871,12 @@ class WidgetPackageUpdate(BaseModel):
     icon: str | None = Field(default=None, max_length=20)
     version: str | None = Field(default=None, max_length=40)
     manifest: dict | None = None
+    # Note (PER-14): patches now write into ``draft_html_source`` by
+    # default — published HTML changes only via POST .../publish. The
+    # ``html_source`` field below is preserved for callers that want
+    # to edit the published copy directly (one-off fixes / migrations).
     html_source: str | None = None
+    draft_html_source: str | None = None
     is_active: bool | None = None
     sort_order: int | None = None
 
@@ -949,12 +964,18 @@ async def get_widget_package_source(
     if p is None:
         raise HTTPException(404, "Пакет не найден")
     await _require_ws_member(session, p.workspace_id, user)
+    has_draft = (
+        p.draft_html_source is not None
+        and p.draft_html_source != p.html_source
+    )
     return WidgetPackageSource(
         id=p.id,
         code=p.code,
         version=p.version,
         manifest=p.manifest or {},
         html_source=p.html_source,
+        draft_html_source=p.draft_html_source,
+        has_draft=has_draft,
     )
 
 
@@ -976,10 +997,25 @@ async def update_widget_package(
     if p.author_user_id != user.id and role != WsRole.MODERATOR and not is_admin:
         raise HTTPException(403, "Менять пакет может только автор или модератор")
     data = payload.model_dump(exclude_unset=True)
+    # PER-14: regular HTML edits go into draft so live widgets keep
+    # rendering the published copy until the author clicks Publish.
+    # Callers that explicitly want to overwrite the published version
+    # (one-off fixes / migrations) can send draft_html_source directly
+    # — that field bypasses the redirection.
     if "html_source" in data and data["html_source"] is not None:
         _require_html_size(data["html_source"])
+        if "draft_html_source" not in data:
+            data["draft_html_source"] = data.pop("html_source")
+        else:
+            # Caller sent both — respect both, but still validate sizes.
+            _require_html_size(data["draft_html_source"] or "")
+    if data.get("draft_html_source"):
+        _require_html_size(data["draft_html_source"])
     for k, v in data.items():
-        if v is not None:
+        # ``draft_html_source`` is the one field where None has meaning
+        # (= "discard the draft, fall back to published"), so let it
+        # through; everything else uses the legacy "skip None" rule.
+        if k == "draft_html_source" or v is not None:
             setattr(p, k, v)
     await session.commit()
     await session.refresh(p)
@@ -1004,6 +1040,55 @@ async def delete_widget_package(
     # will show "пакет удалён" rather than leaving a dangling FK.
     await session.delete(p)
     await session.commit()
+
+
+def _bump_patch_version(version: str) -> str:
+    """Increment the patch (third) component of a semver-ish string.
+    Falls back to appending ``.1`` for malformed versions so the call
+    never crashes; the user can always overwrite manually after."""
+    parts = version.split(".")
+    if len(parts) >= 3:
+        try:
+            parts[2] = str(int(parts[2]) + 1)
+            return ".".join(parts)
+        except ValueError:
+            pass
+    return version + ".1"
+
+
+@router.post(
+    "/widget-packages/{package_id}/publish",
+    response_model=WidgetPackageRead,
+)
+async def publish_widget_package(
+    package_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> WidgetPackage:
+    """Promote ``draft_html_source`` to ``html_source`` and bump the
+    patch version (PER-14). After this call, dashboards rendering
+    custom widgets that point at this package will see the new HTML
+    on their next data refresh.
+
+    No-op (still 200) if there's no draft or the draft equals the
+    published copy — saves the user from a confusing "publish what?"
+    error when they hit the button after just opening the editor.
+    """
+    p = await session.get(WidgetPackage, package_id)
+    if p is None:
+        raise HTTPException(404, "Пакет не найден")
+    role = await _ws_member_role(session, p.workspace_id, user.id)
+    is_admin = "users.view" in (user.permissions or [])
+    if p.author_user_id != user.id and role != WsRole.MODERATOR and not is_admin:
+        raise HTTPException(403, "Публиковать пакет может только автор или модератор")
+    if p.draft_html_source is not None and p.draft_html_source != p.html_source:
+        _require_html_size(p.draft_html_source)
+        p.html_source = p.draft_html_source
+        p.draft_html_source = None
+        p.version = _bump_patch_version(p.version)
+        await session.commit()
+        await session.refresh(p)
+    return p
 
 
 # ── Reorder helpers (PER-15) ────────────────────────────────────────────────

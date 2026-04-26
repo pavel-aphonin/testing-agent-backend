@@ -242,6 +242,12 @@ class WidgetPackage(Base):
     # via srcdoc, so relative URLs / localStorage don't leak from the
     # parent app. The script talks to us via window.postMessage.
     html_source: Mapped[str] = mapped_column(Text, nullable=False)
+    # Working copy that authors edit in /widget-packages without
+    # disturbing the published version (PER-14). NULL means "no
+    # in-progress edits" — the editor falls back to html_source for
+    # display. Publishing copies this into html_source and clears the
+    # draft, plus bumps version's patch number.
+    draft_html_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Same semantics as WidgetTemplate.sort_order — manual ordering
     # inside the workspace's package list. Migration 20260427 adds it.
