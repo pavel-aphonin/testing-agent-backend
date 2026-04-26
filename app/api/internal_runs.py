@@ -84,11 +84,26 @@ async def claim_next_pending_run(
     )
 
     # Load test data entries — the agent uses these to fill form fields.
+    # SCOPED to the run's workspace: previously this query returned every
+    # workspace's keys, which both leaked credentials across tenants and
+    # made same-named keys (e.g. "password") collide in unpredictable
+    # order. We also ORDER BY created_at DESC + dict-build so within one
+    # workspace the freshest value wins on duplicate keys (UI doesn't
+    # currently enforce uniqueness; that's a separate cleanup).
     from app.models.test_data import TestData
     td_rows = (
-        await session.execute(select(TestData.key, TestData.value))
+        await session.execute(
+            select(TestData.key, TestData.value)
+            .where(TestData.workspace_id == run.workspace_id)
+            .order_by(TestData.created_at.desc())
+        )
     ).all()
-    test_data = {row.key: row.value for row in td_rows}
+    # Dict comprehension iterates in order — earlier (newer) wins, since
+    # later entries with the same key would just overwrite. Reverse the
+    # iteration to keep the newest first by walking explicitly.
+    test_data: dict[str, str] = {}
+    for key, value in td_rows:
+        test_data.setdefault(key, value)
 
     # Expand scenario IDs into full step payloads. The worker walks these
     # before falling back to free exploration.
