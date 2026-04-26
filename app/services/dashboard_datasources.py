@@ -113,6 +113,18 @@ _METADATA: list[dict[str, Any]] = [
      "description": "Мультисерия: AI / MC / Hybrid — разные линии или столбцы по дням.",
      "kind": "timeseries",
      "params": [{"code": "days", "type": "number", "default": 14}]},
+    {"code": "runs.total_last_n_days",   "group": "runs",
+     "name": "Запусков за N дней (KPI)",
+     "description": "Скаляр: COUNT за последние N дней + baseline за предыдущие N. "
+                    "Оптимизирован для виджетов stat / progress (две точки, не 14).",
+     "kind": "categorical",
+     "params": [{"code": "days", "type": "number", "default": 7}]},
+    {"code": "runs.success_rate_current","group": "runs",
+     "name": "Доля успешных запусков (KPI)",
+     "description": "Скаляр: % completed от всех за последние N дней + baseline за "
+                    "предыдущие N. Подходит для progress-виджета с target=100.",
+     "kind": "categorical",
+     "params": [{"code": "days", "type": "number", "default": 7}]},
 
     # ── Defects ─────────────────────────────────────────────────────
     {"code": "defects.by_priority",      "group": "defects",
@@ -133,6 +145,12 @@ _METADATA: list[dict[str, Any]] = [
      "description": "Мультисерия: P0/P1/P2/P3 — отдельные ряды. Подходит для stacked bar.",
      "kind": "timeseries",
      "params": [{"code": "days", "type": "number", "default": 14}]},
+    {"code": "defects.active_count",     "group": "defects",
+     "name": "Активные дефекты (KPI)",
+     "description": "Скаляр: число дефектов за последние N дней + baseline за предыдущие. "
+                    "У defects сейчас нет статуса «closed» — считаем все созданные за окно.",
+     "kind": "categorical",
+     "params": [{"code": "days", "type": "number", "default": 7}]},
     {"code": "defects.top_screens",      "group": "defects",
      "name": "Экраны с наибольшим числом дефектов",
      "description": "Top-N экранов, где находят больше всего проблем.",
@@ -193,11 +211,21 @@ _METADATA: list[dict[str, Any]] = [
      "description": "Top-N приложений по количеству установок в этом пространстве.",
      "kind": "categorical",
      "params": [{"code": "limit", "type": "number", "default": 10}]},
+    {"code": "apps.installs_total",      "group": "apps",
+     "name": "Установок всего (KPI)",
+     "description": "Скаляр: общее число установок приложений в пространстве. "
+                    "Без baseline — одна точка для stat-виджета.",
+     "kind": "categorical"},
 
     # ── Users ───────────────────────────────────────────────────────
     {"code": "users.by_role",            "group": "users",
      "name": "Пользователи по ролям",
      "description": "Сколько администраторов / тестировщиков / наблюдателей.",
+     "kind": "categorical"},
+    {"code": "users.active_count",       "group": "users",
+     "name": "Активные пользователи (KPI)",
+     "description": "Скаляр: COUNT активных пользователей в пространстве. "
+                    "Одна точка — для stat-виджета без baseline.",
      "kind": "categorical"},
 
     # ── Feedback ────────────────────────────────────────────────────
@@ -379,6 +407,135 @@ def _densify_multi(
         name = (labels or {}).get(g, g)
         series.append({"name": name, "data": data})
     return {"categories": out_cats, "series": series}
+
+
+def _kpi_two_point(name: str, baseline: float | int, current: float | int) -> dict[str, Any]:
+    """Pack a (baseline, current) pair into the standard
+    {categories, series} payload that StatWidget knows how to read.
+    Categories are user-facing labels; values come straight from the
+    DB. The widget renders ``current`` big and the delta to baseline
+    as the trend arrow."""
+    return {
+        "categories": ["Прошлый период", "Текущий период"],
+        "series": [{"name": name, "data": [int(baseline), int(current)]}],
+    }
+
+
+async def _runs_total_last_n_days(session, ws_id, params):
+    """Two COUNT(*) windows: current N days vs the previous N days.
+    Two points fit StatWidget perfectly — no need to gen 14 daily
+    values just to display a single number with a trend arrow.
+    """
+    days = max(1, min(int(params.get("days", 7)), 90))
+    now = datetime.now(timezone.utc)
+    cur_from = now - timedelta(days=days)
+    prev_from = now - timedelta(days=days * 2)
+    sql = text(
+        """
+        SELECT
+          COUNT(*) FILTER (WHERE started_at >= :cur_from) AS cur,
+          COUNT(*) FILTER (WHERE started_at >= :prev_from
+                           AND started_at <  :cur_from)   AS prev
+        FROM runs
+        WHERE workspace_id = :ws AND started_at IS NOT NULL
+        """
+    )
+    row = (await session.execute(sql, {
+        "ws": str(ws_id), "cur_from": cur_from, "prev_from": prev_from,
+    })).first()
+    return _kpi_two_point("Запуски", row[1] or 0, row[0] or 0)
+
+
+async def _runs_success_rate_current(session, ws_id, params):
+    """Percent of completed runs over the last N days, with the same
+    metric for the previous N days as baseline. Pair this with a
+    progress widget (target=100) for a 0-100% gauge."""
+    days = max(1, min(int(params.get("days", 7)), 90))
+    now = datetime.now(timezone.utc)
+    cur_from = now - timedelta(days=days)
+    prev_from = now - timedelta(days=days * 2)
+    sql = text(
+        """
+        WITH cur AS (
+          SELECT COUNT(*)::float AS total,
+                 COUNT(*) FILTER (WHERE status = 'completed')::float AS ok
+          FROM runs
+          WHERE workspace_id = :ws AND started_at >= :cur_from
+        ),
+        prev AS (
+          SELECT COUNT(*)::float AS total,
+                 COUNT(*) FILTER (WHERE status = 'completed')::float AS ok
+          FROM runs
+          WHERE workspace_id = :ws
+            AND started_at >= :prev_from AND started_at < :cur_from
+        )
+        SELECT
+          CASE WHEN cur.total > 0 THEN ROUND(cur.ok / cur.total * 100) ELSE 0 END AS cur_pct,
+          CASE WHEN prev.total > 0 THEN ROUND(prev.ok / prev.total * 100) ELSE 0 END AS prev_pct
+        FROM cur, prev
+        """
+    )
+    row = (await session.execute(sql, {
+        "ws": str(ws_id), "cur_from": cur_from, "prev_from": prev_from,
+    })).first()
+    return _kpi_two_point("Успешных, %", row[1] or 0, row[0] or 0)
+
+
+async def _defects_active_count(session, ws_id, params):
+    """Count of defects created over the last N days, with the prior
+    N-day window as baseline. ``defects`` doesn't yet have a closed
+    state — once that lands, swap to filtering open ones."""
+    days = max(1, min(int(params.get("days", 7)), 90))
+    now = datetime.now(timezone.utc)
+    cur_from = now - timedelta(days=days)
+    prev_from = now - timedelta(days=days * 2)
+    sql = text(
+        """
+        SELECT
+          COUNT(*) FILTER (WHERE d.created_at >= :cur_from) AS cur,
+          COUNT(*) FILTER (WHERE d.created_at >= :prev_from
+                           AND d.created_at <  :cur_from)   AS prev
+        FROM defects d JOIN runs r ON r.id = d.run_id
+        WHERE r.workspace_id = :ws
+        """
+    )
+    row = (await session.execute(sql, {
+        "ws": str(ws_id), "cur_from": cur_from, "prev_from": prev_from,
+    })).first()
+    return _kpi_two_point("Дефекты", row[1] or 0, row[0] or 0)
+
+
+async def _apps_installs_total(session, ws_id, params):
+    """Single-point KPI: total app installations in the workspace.
+    Used by stat-widget without a trend arrow (only one data point)."""
+    sql = text(
+        "SELECT COUNT(*) FROM app_installations WHERE workspace_id = :ws"
+    )
+    n = (await session.execute(sql, {"ws": str(ws_id)})).scalar() or 0
+    return {
+        "categories": ["Всего"],
+        "series": [{"name": "Установки", "data": [int(n)]}],
+    }
+
+
+async def _users_active_count(session, ws_id, params):
+    """Single-point KPI: active users in the workspace. ``is_active``
+    is a global flag on the user row — there's no per-workspace
+    activity flag yet, so this counts global-active users who are
+    members of this workspace."""
+    sql = text(
+        """
+        SELECT COUNT(DISTINCT u.id)
+        FROM users u
+        JOIN workspace_members wm ON wm.user_id = u.id
+        WHERE wm.workspace_id = :ws AND u.is_active IS TRUE
+        """
+    )
+    n = (await session.execute(sql, {"ws": str(ws_id)})).scalar() or 0
+    return {
+        "categories": ["Активные"],
+        "series": [{"name": "Пользователи", "data": [int(n)]}],
+    }
 
 
 async def _by_day_by_status(session, ws_id, params):
@@ -886,6 +1043,8 @@ HANDLERS: dict[str, DatasourceHandler] = {
     "runs.by_day":                _by_day,
     "runs.by_day_by_status":      _by_day_by_status,
     "runs.by_day_by_mode":        _by_day_by_mode,
+    "runs.total_last_n_days":     _runs_total_last_n_days,
+    "runs.success_rate_current":  _runs_success_rate_current,
     "runs.by_hour_of_day":        _by_hour_of_day,
     "runs.duration_by_day":       _duration_by_day,
     "runs.duration_distribution": _duration_distribution,
@@ -896,6 +1055,7 @@ HANDLERS: dict[str, DatasourceHandler] = {
     "defects.by_kind":            _defects_by_kind,
     "defects.by_day":             _defects_by_day,
     "defects.by_day_by_priority": _defects_by_day_by_priority,
+    "defects.active_count":       _defects_active_count,
     "defects.top_screens":        _defects_top_screens,
     "defects.recent":             _defects_recent,
     "screens.top_by_run":         _screens_top_by_run,
@@ -907,7 +1067,9 @@ HANDLERS: dict[str, DatasourceHandler] = {
     "test_data.by_category":      _test_data_by_category,
     "apps.by_category":           _apps_by_category,
     "apps.installs_top":          _apps_installs_top,
+    "apps.installs_total":        _apps_installs_total,
     "users.by_role":              _users_by_role,
+    "users.active_count":         _users_active_count,
     "feedback.by_status":         _feedback_by_status,
     "feedback.by_kind":           _feedback_by_kind,
 }
