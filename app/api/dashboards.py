@@ -472,7 +472,15 @@ async def get_widget_data(
 ) -> dict[str, Any]:
     """Resolve the widget's configured data source against its dashboard's
     workspace. Returns an empty payload (not a 404) when the widget has
-    no source — UI renders the "нечего отрисовать" state."""
+    no source — UI renders the "нечего отрисовать" state.
+
+    Redis-cached (PER-17): the same widget on N open dashboards / tabs
+    only hits the DB once per cache window. TTL is derived from the
+    widget's auto-refresh interval (half of it, capped at 30 s) so a
+    "live" widget doesn't show stale data, but a normal page-load
+    sweep with 10+ widgets pointing at heavy aggregates doesn't
+    multiply N times.
+    """
     w = await session.get(DashboardWidget, widget_id)
     if w is None:
         raise HTTPException(404, "Виджет не найден")
@@ -481,9 +489,44 @@ async def get_widget_data(
         raise HTTPException(403, "Нет доступа")
     if not w.datasource_code:
         return {"categories": [], "series": [{"name": "—", "data": []}]}
-    return await ds.resolve(
+
+    # Cache key: workspace + datasource + params hash. Includes widget
+    # id only as a *fallback* — same source/params on different widgets
+    # share the cached payload, which is the whole point.
+    import hashlib as _hl
+    import json as _json
+    from app.redis_bus import get_redis as _get_redis
+    refresh_seconds = ((w.chart_options or {}).get("_refresh_seconds") or 0)
+    if isinstance(refresh_seconds, (int, float)) and refresh_seconds >= 10:
+        ttl = int(min(30, max(5, refresh_seconds // 2)))
+    else:
+        ttl = 30  # default — most widgets are loaded by the page sweep
+    params_blob = _json.dumps(w.datasource_params or {}, sort_keys=True)
+    cache_key = (
+        "widget-data:"
+        f"{d.workspace_id}:"
+        f"{w.datasource_code}:"
+        f"{_hl.sha256(params_blob.encode()).hexdigest()[:16]}"
+    )
+    redis = _get_redis()
+    try:
+        cached = await redis.get(cache_key)
+    except Exception:
+        cached = None  # don't fail the request just because Redis is down
+    if cached:
+        try:
+            return _json.loads(cached)
+        except Exception:
+            pass
+
+    payload = await ds.resolve(
         w.datasource_code, d.workspace_id, w.datasource_params, session
     )
+    try:
+        await redis.set(cache_key, _json.dumps(payload), ex=ttl)
+    except Exception:
+        pass  # cache write failures are non-fatal
+    return payload
 
 
 # ── Endpoints: widget templates ──────────────────────────────────────────────
