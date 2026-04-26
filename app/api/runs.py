@@ -268,6 +268,38 @@ async def get_edge_screenshot(
     return FileResponse(file_path, media_type="image/png")
 
 
+@router.get("/{run_id}/diff")
+async def get_run_diff(
+    run_id: UUID,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    against: UUID,
+):
+    """Diff this run against ``against`` (PER-27).
+
+    Returns lists of screens / edges / defects that were added,
+    removed, or persist between the two runs, plus a summary block.
+    Both runs must be visible to the caller — check follows the same
+    rule as get_run.
+    """
+    # Visibility check: both runs are loaded with the standard "owner
+    # or users.view" gate. Cross-workspace diffs are intentionally
+    # *allowed* if the caller can see both runs — same user with two
+    # workspaces probably wants to compare them.
+    cur = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
+    if cur is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _has_perm(user, "users.view") and cur.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+    base = (await session.execute(select(Run).where(Run.id == against))).scalar_one_or_none()
+    if base is None:
+        raise HTTPException(status_code=404, detail="Baseline run not found")
+    if not _has_perm(user, "users.view") and base.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your baseline run")
+    from app.services.run_diff import diff_runs
+    return await diff_runs(session, run_id, against)
+
+
 @router.get("/{run_id}/screens/{screen_hash}/screenshot")
 async def get_screen_screenshot(
     run_id: UUID,
