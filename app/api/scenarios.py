@@ -19,8 +19,34 @@ from app.db import get_async_session
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario import ScenarioCreate, ScenarioRead, ScenarioUpdate
+from app.services.scenario_validator import find_unresolved_placeholders
 
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
+
+
+async def _check_placeholders(
+    session: AsyncSession,
+    workspace_id: UUID | None,
+    steps_json: dict | None,
+) -> None:
+    """Reject the request if any ``{{test_data.X}}`` placeholder in
+    the steps doesn't resolve in the target workspace's TestData.
+    Raises HTTPException(400) with a list of missing keys so the UI
+    can highlight them. See PER-21."""
+    steps = (steps_json or {}).get("steps") if steps_json else None
+    missing = await find_unresolved_placeholders(session, workspace_id, steps)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "unresolved_placeholders",
+                "message": (
+                    "В сценарии используются ключи test_data, которых нет "
+                    "в этом пространстве: " + ", ".join(missing)
+                ),
+                "missing_keys": missing,
+            },
+        )
 
 
 @router.get("", response_model=list[ScenarioRead])
@@ -49,6 +75,7 @@ async def create_scenario(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Scenario:
+    await _check_placeholders(session, payload.workspace_id, payload.steps_json)
     scenario = Scenario(
         title=payload.title,
         description=payload.description,
@@ -95,7 +122,17 @@ async def update_scenario(
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    patch = payload.model_dump(exclude_unset=True)
+    # If the patch touches steps_json (or workspace_id) — re-validate
+    # placeholders against the *new* state. Use the fresh value where
+    # provided, fall back to the existing one otherwise.
+    if "steps_json" in patch or "workspace_id" in patch:
+        await _check_placeholders(
+            session,
+            patch.get("workspace_id", scenario.workspace_id),
+            patch.get("steps_json", scenario.steps_json),
+        )
+    for field, value in patch.items():
         setattr(scenario, field, value)
 
     await session.commit()
