@@ -175,6 +175,15 @@ class Edge(Base):
     action_details_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     step_idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Timeline (PER-25): per-edge artefacts the worker captures around
+    # the action. ``before`` = the screen the agent saw when it picked
+    # the action; ``after`` = what landed afterwards. ``llm_reasoning``
+    # is the model's one-line "why I did this" — only populated when
+    # the loop ran in HYBRID/AI mode. All three are nullable so older
+    # runs (and runs from non-LLM modes) keep loading.
+    screenshot_before_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screenshot_after_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -253,6 +253,26 @@ async def post_run_event(
                 status_code=422,
                 detail="source_screen_hash, target_screen_hash, and action_type are required",
             )
+        # Persist optional before/after timeline artefacts (PER-25).
+        # Filename uses run_id + step_idx so two edges at the same
+        # step (rare but possible after retries) overwrite cleanly
+        # rather than piling up. Failures here mustn't break edge
+        # insertion — the timeline tab degrades gracefully.
+        before_path: str | None = None
+        after_path: str | None = None
+        try:
+            screenshots_dir = Path(settings.app_uploads_dir) / "screenshots" / str(run.id)
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+            if event.screenshot_before_b64:
+                p = screenshots_dir / f"step{event.step_idx}-before.png"
+                p.write_bytes(base64.b64decode(event.screenshot_before_b64))
+                before_path = f"screenshots/{run.id}/step{event.step_idx}-before.png"
+            if event.screenshot_after_b64:
+                p = screenshots_dir / f"step{event.step_idx}-after.png"
+                p.write_bytes(base64.b64decode(event.screenshot_after_b64))
+                after_path = f"screenshots/{run.id}/step{event.step_idx}-after.png"
+        except Exception:
+            pass
         edge = Edge(
             run_id=run.id,
             source_screen_hash=event.source_screen_hash,
@@ -261,6 +281,9 @@ async def post_run_event(
             action_details_json=event.action_details,
             success=event.success if event.success is not None else True,
             step_idx=event.step_idx,
+            screenshot_before_path=before_path,
+            screenshot_after_path=after_path,
+            llm_reasoning=event.llm_reasoning,
         )
         session.add(edge)
 

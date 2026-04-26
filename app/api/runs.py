@@ -231,6 +231,43 @@ async def get_run_results(
     )
 
 
+@router.get("/{run_id}/edges/{edge_id}/screenshot")
+async def get_edge_screenshot(
+    run_id: UUID,
+    edge_id: int,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    side: str = "before",
+):
+    """Serve the before/after screenshot for an Edge (PER-25 timeline).
+
+    ``side`` is "before" (default) or "after". Returns 404 cleanly
+    when the edge has no screenshot for the requested side — older
+    runs and MC-mode runs leave both fields null.
+    """
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+
+    from app.models.run import Edge as _Edge
+    edge_result = await session.execute(
+        select(_Edge).where(_Edge.id == edge_id, _Edge.run_id == run_id)
+    )
+    edge = edge_result.scalar_one_or_none()
+    if edge is None:
+        raise HTTPException(status_code=404, detail="Edge not found")
+    rel_path = edge.screenshot_after_path if side == "after" else edge.screenshot_before_path
+    if not rel_path:
+        raise HTTPException(status_code=404, detail="Screenshot not captured")
+    file_path = Path(settings.app_uploads_dir) / rel_path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Screenshot file missing")
+    return FileResponse(file_path, media_type="image/png")
+
+
 @router.get("/{run_id}/screens/{screen_hash}/screenshot")
 async def get_screen_screenshot(
     run_id: UUID,

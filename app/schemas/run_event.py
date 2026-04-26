@@ -40,6 +40,13 @@ class RunEventIn(BaseModel):
     action_type: str | None = None
     action_details: dict | None = None
     success: bool | None = None
+    # Timeline (PER-25): per-edge artefacts. Workers in HYBRID/AI mode
+    # send the screenshot they captured before the action and the one
+    # right after, plus a one-line LLM rationale. All optional — older
+    # workers and MC-mode runs leave these null.
+    screenshot_before_b64: str | None = None
+    screenshot_after_b64: str | None = None
+    llm_reasoning: str | None = None
 
     # log / error
     message: str | None = None

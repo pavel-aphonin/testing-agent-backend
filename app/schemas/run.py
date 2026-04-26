@@ -138,6 +138,11 @@ class EdgeRead(BaseModel):
     action_details_json: dict | None
     success: bool
     step_idx: int
+    # Timeline (PER-25). Relative paths under app_uploads_dir; the UI
+    # combines them with /api/runs/{id}/file?path=… to fetch.
+    screenshot_before_path: str | None = None
+    screenshot_after_path: str | None = None
+    llm_reasoning: str | None = None
     created_at: datetime
 
 
