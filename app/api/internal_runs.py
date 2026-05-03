@@ -128,6 +128,9 @@ async def claim_next_pending_run(
                 "id": str(s.id),
                 "title": s.title,
                 "steps": (s.steps_json or {}).get("steps", []),
+                # PER-35: scope RAG verification to the linked spec
+                # documents (empty list = whole workspace corpus).
+                "rag_document_ids": [str(d) for d in (s.rag_document_ids or [])],
             })
 
     return RunClaimResponse(

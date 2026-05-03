@@ -18,6 +18,9 @@ class ScenarioRead(BaseModel):
     is_active: bool
     created_by_user_id: uuid.UUID
     workspace_id: uuid.UUID | None = None
+    # PER-35: optional list of knowledge document UUIDs that scope this
+    # scenario's RAG checks. Null/empty = whole workspace corpus.
+    rag_document_ids: list[uuid.UUID] | None = None
     created_at: datetime
 
 
@@ -26,6 +29,7 @@ class ScenarioCreate(BaseModel):
     description: str | None = None
     steps_json: dict
     workspace_id: uuid.UUID | None = None
+    rag_document_ids: list[uuid.UUID] | None = None
 
 
 class ScenarioUpdate(BaseModel):
@@ -33,3 +37,4 @@ class ScenarioUpdate(BaseModel):
     description: str | None = None
     steps_json: dict | None = None
     is_active: bool | None = None
+    rag_document_ids: list[uuid.UUID] | None = None

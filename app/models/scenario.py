@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -20,6 +20,11 @@ class Scenario(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     steps_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # PER-35: optional list of knowledge document UUIDs that scope this
+    # scenario's RAG verification to a specific spec. Empty / null means
+    # "search the whole workspace corpus" (legacy behaviour). Stored as
+    # JSONB so we can query / filter by membership later if needed.
+    rag_document_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     created_by_user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

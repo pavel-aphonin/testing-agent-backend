@@ -439,9 +439,11 @@ async def query_knowledge_base(
             distance,
         )
         .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
-        .order_by(distance)
-        .limit(retrieval_k)
     )
+    # PER-35: scope the vector search to a doc allow-list when given.
+    if payload.document_ids:
+        stmt = stmt.where(KnowledgeChunk.document_id.in_(payload.document_ids))
+    stmt = stmt.order_by(distance).limit(retrieval_k)
     rows = (await session.execute(stmt)).all()
 
     candidates = [

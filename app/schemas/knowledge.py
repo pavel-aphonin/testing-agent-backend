@@ -44,6 +44,11 @@ class KnowledgeQuery(BaseModel):
 
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    # PER-35: when non-empty, restrict the search to chunks belonging
+    # to these documents only. Lets a scenario sweep its own spec
+    # instead of the whole workspace corpus, killing the "wrong-doc
+    # shouts ‘matched’" failure mode.
+    document_ids: list[uuid.UUID] | None = Field(default=None)
 
 
 class KnowledgeMatch(BaseModel):
