@@ -96,6 +96,23 @@ class Run(Base):
     os_version: Mapped[str | None] = mapped_column(String(200), nullable=True)
     app_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # PER-40 / PER-41: a re-run of a previously-recorded path. When set,
+    # ``replay_actions_json`` carries the action sequence the worker
+    # should execute before falling into free exploration; ``replay_of``
+    # links back to the source run for provenance / banner display.
+    # Both null on regular runs (the common case).
+    replay_of: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    replay_actions_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # PER-41 specifically: target screen hash the worker should land on
+    # before starting free exploration. Useful for the banner "started
+    # from screen X". Falls back to NULL for plain replays (PER-40).
+    started_from_screen_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Path on disk for the explorer output dir (graph.json, screenshots, etc.)
     output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
 

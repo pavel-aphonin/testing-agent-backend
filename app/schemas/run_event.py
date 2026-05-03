@@ -88,3 +88,11 @@ class RunClaimResponse(BaseModel):
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False
+    # PER-40 / PER-41: pre-recorded action sequence the worker plays
+    # back BEFORE free exploration. Each entry has the shape produced
+    # by ``app/services/path_finder.py::serialize_action`` — see worker
+    # for how it gets converted to ActionDetail.
+    # Empty list = no replay; non-empty + max_steps>0 = replay then
+    # explore (PER-41); non-empty + max_steps==0 = replay only (PER-40
+    # with continue_after_replay=False).
+    replay_actions: list[dict] = []

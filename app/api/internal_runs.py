@@ -152,6 +152,12 @@ async def claim_next_pending_run(
         scenarios=scenarios,
         # Property-based testing of form validation
         pbt_enabled=run.pbt_enabled,
+        # PER-40 / PER-41: pre-recorded action chain to play back
+        # before exploration. Empty list on regular runs. Worker
+        # interprets: replay_actions+max_steps>0 = replay then
+        # explore (PER-41); replay_actions+max_steps==0 = replay
+        # only (PER-40 with continue_after_replay=False).
+        replay_actions=run.replay_actions_json or [],
     )
 
 

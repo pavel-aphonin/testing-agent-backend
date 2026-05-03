@@ -23,7 +23,14 @@ from app.db import get_async_session
 from app.models.device_config import DeviceConfig
 from app.models.run import Edge, Run, RunStatus, Screen
 from app.models.user import User
-from app.schemas.run import RunCreate, RunCreateV2, RunRead, RunResultRead
+from app.schemas.run import (
+    ReplayPathRequest,
+    RunCreate,
+    RunCreateV2,
+    RunRead,
+    RunResultRead,
+    StartFromScreenRequest,
+)
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -298,6 +305,205 @@ async def get_run_diff(
         raise HTTPException(status_code=403, detail="Not your baseline run")
     from app.services.run_diff import diff_runs
     return await diff_runs(session, run_id, against)
+
+
+def _resolve_app_file(payload_app_file_id: str | None, source_run: Run) -> str | None:
+    """PER-40 / PER-41: pick the app the new run will install. Falls
+    back to the source run's app_file_path when the caller didn't
+    upload a new build. Returns the relative path that goes into
+    Run.app_file_path."""
+    if payload_app_file_id:
+        meta_path = Path(settings.app_uploads_dir) / payload_app_file_id / "meta.json"
+        if not meta_path.exists():
+            raise HTTPException(400, "App upload not found. Upload the app first.")
+        meta = json.loads(meta_path.read_text())
+        return meta["app_relative_path"]
+    return source_run.app_file_path
+
+
+async def _resolve_device_config(
+    session: AsyncSession,
+    payload_device_config_id: UUID | None,
+    source_run: Run,
+) -> DeviceConfig | None:
+    """Return the device config to use; reuse source run's config if
+    caller didn't override. Validates active state."""
+    if payload_device_config_id is not None:
+        dc = (
+            await session.execute(
+                select(DeviceConfig).where(DeviceConfig.id == payload_device_config_id)
+            )
+        ).scalar_one_or_none()
+        if dc is None:
+            raise HTTPException(400, "Device configuration not found")
+        if not dc.is_active:
+            raise HTTPException(400, "This device configuration is disabled")
+        return dc
+    # Reuse source run's identifiers — there's no FK from Run to
+    # DeviceConfig, so we look it up by the (device_identifier,
+    # os_identifier) pair.
+    if source_run.device_type and source_run.os_version:
+        dc = (
+            await session.execute(
+                select(DeviceConfig).where(
+                    DeviceConfig.device_identifier == source_run.device_type,
+                    DeviceConfig.os_identifier == source_run.os_version,
+                )
+            )
+        ).scalar_one_or_none()
+        return dc
+    return None
+
+
+@router.post("/{run_id}/replay-path", response_model=RunRead, status_code=status.HTTP_201_CREATED)
+async def replay_path(
+    run_id: UUID,
+    payload: ReplayPathRequest,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> Run:
+    """Re-run a recorded edge sequence as a brand-new run (PER-40).
+
+    Validates that the supplied edge_ids form a contiguous chain,
+    serialises them into worker-friendly action payloads, and creates
+    a fresh Run with replay_actions_json + replay_of pointing back
+    at the source. The worker plays back these actions before the
+    main exploration loop.
+
+    When ``continue_after_replay`` is False (default), max_steps on
+    the new run is set to 0 so the worker stops as soon as the path
+    is reproduced — useful for "check if this bug still happens".
+    """
+    src = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
+    if src is None:
+        raise HTTPException(404, "Source run not found")
+    if not _has_perm(user, "users.view") and src.user_id != user.id:
+        raise HTTPException(403, "Not your run")
+
+    from app.services.path_finder import edges_by_ids, serialize_action
+    edges = await edges_by_ids(session, run_id, payload.edge_ids)
+    if edges is None:
+        raise HTTPException(
+            400,
+            "edge_ids must belong to this run AND form a connected chain",
+        )
+
+    app_path = _resolve_app_file(payload.app_file_id, src)
+    if app_path is None:
+        raise HTTPException(400, "Source run has no app file and none was supplied")
+    dc = await _resolve_device_config(session, payload.device_config_id, src)
+    if dc is None:
+        raise HTTPException(
+            400,
+            "Cannot resolve device config — supply device_config_id or "
+            "ensure the source run still has a matching DeviceConfig.",
+        )
+    # Worker resolves bundle_id from the meta.json of the upload, but
+    # for legacy compat we keep the source run's bundle_id around.
+    bundle_id = src.bundle_id
+    if payload.app_file_id:
+        meta = json.loads(
+            (Path(settings.app_uploads_dir) / payload.app_file_id / "meta.json").read_text()
+        )
+        bundle_id = meta.get("bundle_id") or bundle_id
+
+    new_run = Run(
+        user_id=user.id,
+        title=f"Replay run {str(src.id)[:8]}",
+        bundle_id=bundle_id,
+        device_id="__PENDING__",
+        platform=src.platform,
+        mode=payload.mode or src.mode,
+        max_steps=src.max_steps if payload.continue_after_replay else 0,
+        c_puct=src.c_puct,
+        rollout_depth=src.rollout_depth,
+        status=RunStatus.PENDING.value,
+        device_type=dc.device_identifier,
+        os_version=dc.os_identifier,
+        app_file_path=app_path,
+        workspace_id=src.workspace_id,
+        replay_of=src.id,
+        replay_actions_json=[serialize_action(e) for e in edges],
+    )
+    session.add(new_run)
+    await session.commit()
+    await session.refresh(new_run)
+    return new_run
+
+
+@router.post(
+    "/{run_id}/start-from-screen",
+    response_model=RunRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_from_screen(
+    run_id: UUID,
+    payload: StartFromScreenRequest,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> Run:
+    """Start a fresh exploration from a chosen screen (PER-41).
+
+    BFS the source run's edge graph from its root to ``target_screen_hash``,
+    serialise the path, and create a new run that replays it then
+    continues with ``max_steps`` of free exploration. Mirror of
+    replay-path with the path computed server-side instead of given by
+    the caller — the UI just needs to pick a node.
+    """
+    src = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
+    if src is None:
+        raise HTTPException(404, "Source run not found")
+    if not _has_perm(user, "users.view") and src.user_id != user.id:
+        raise HTTPException(403, "Not your run")
+
+    from app.services.path_finder import find_path_to, serialize_action
+    path = await find_path_to(session, run_id, payload.target_screen_hash)
+    if path is None:
+        raise HTTPException(
+            400,
+            "Target screen is not reachable from the start state in this run's graph.",
+        )
+
+    app_path = _resolve_app_file(payload.app_file_id, src)
+    if app_path is None:
+        raise HTTPException(400, "Source run has no app file and none was supplied")
+    dc = await _resolve_device_config(session, payload.device_config_id, src)
+    if dc is None:
+        raise HTTPException(
+            400,
+            "Cannot resolve device config — supply device_config_id or "
+            "ensure the source run still has a matching DeviceConfig.",
+        )
+    bundle_id = src.bundle_id
+    if payload.app_file_id:
+        meta = json.loads(
+            (Path(settings.app_uploads_dir) / payload.app_file_id / "meta.json").read_text()
+        )
+        bundle_id = meta.get("bundle_id") or bundle_id
+
+    new_run = Run(
+        user_id=user.id,
+        title=f"From screen {payload.target_screen_hash[:8]}",
+        bundle_id=bundle_id,
+        device_id="__PENDING__",
+        platform=src.platform,
+        mode=payload.mode or src.mode,
+        max_steps=payload.max_steps,
+        c_puct=src.c_puct,
+        rollout_depth=src.rollout_depth,
+        status=RunStatus.PENDING.value,
+        device_type=dc.device_identifier,
+        os_version=dc.os_identifier,
+        app_file_path=app_path,
+        workspace_id=src.workspace_id,
+        replay_of=src.id,
+        replay_actions_json=[serialize_action(e) for e in path],
+        started_from_screen_hash=payload.target_screen_hash,
+    )
+    session.add(new_run)
+    await session.commit()
+    await session.refresh(new_run)
+    return new_run
 
 
 @router.get("/{run_id}/screens/{screen_hash}/elements")

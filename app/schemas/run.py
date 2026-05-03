@@ -73,6 +73,33 @@ class RunRead(BaseModel):
     device_type: str | None = None
     os_version: str | None = None
     app_file_path: str | None = None
+    # PER-40 / PER-41: replay metadata so the UI can render the
+    # "this is a replay of X" / "started from screen Y" banners.
+    # All null on regular runs.
+    replay_of: UUID | None = None
+    started_from_screen_hash: str | None = None
+
+
+class ReplayPathRequest(BaseModel):
+    """PER-40: re-run a recorded edge sequence as a brand-new run."""
+    edge_ids: list[int] = Field(..., min_length=1, max_length=500)
+    # When None — reuse the source run's app_file / device_config.
+    app_file_id: str | None = None
+    device_config_id: UUID | None = None
+    mode: str | None = None  # default = source run's mode
+    # When True, exploration continues after the replay finishes;
+    # otherwise the run stops once the path is reproduced.
+    continue_after_replay: bool = False
+
+
+class StartFromScreenRequest(BaseModel):
+    """PER-41: start a fresh exploration from a chosen screen by
+    replaying the navigation path the original run discovered."""
+    target_screen_hash: str = Field(..., min_length=1, max_length=64)
+    max_steps: int = Field(default=30, ge=1, le=1000)
+    mode: str | None = None  # default = source run's mode
+    app_file_id: str | None = None
+    device_config_id: UUID | None = None
 
 
 # ── Simulator config schemas (for admin device management) ──
