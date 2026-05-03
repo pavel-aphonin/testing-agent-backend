@@ -79,7 +79,7 @@ async def stream_mirror(
     """MJPEG passthrough of the simulator window for a running run.
 
     Returns 503 if the SimMirror sidecar is unreachable (run not yet
-    claimed by a real-executor worker, or running in synthetic mode).
+    claimed by a host worker, or SimMirror failed to start).
     """
     await _check_run_visible(run_id, user, session)
 
@@ -100,11 +100,10 @@ async def stream_mirror(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "Live mirror is not available. Either the run is not "
-                "currently being executed by a real-iOS worker, or the "
+                "currently being executed by a host worker, or the "
                 "SimMirror sidecar failed to start. Check that the "
-                "worker is running with --executor real on a host "
-                "with a booted simulator and that "
-                "testing-agent-sim-mirror has been built."
+                "worker is running on a host with a booted simulator "
+                "and that testing-agent-sim-mirror has been built."
             ),
         )
 

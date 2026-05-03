@@ -79,7 +79,6 @@ from app.schemas.user import UserRead, UserUpdate
 from app.seed import (
     seed_demo_apps,
     seed_demo_dashboard_data,
-    seed_demo_scenario,
     seed_demo_widget_packages,
     seed_help_articles,
     seed_initial_admin,
@@ -120,7 +119,6 @@ async def lifespan(app: FastAPI):
     await seed_release_notes()
     await seed_demo_dashboard_data()
     await seed_demo_widget_packages()
-    await seed_demo_scenario()
     yield
     await engine.dispose()
 
