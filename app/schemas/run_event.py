@@ -47,6 +47,9 @@ class RunEventIn(BaseModel):
     screenshot_before_b64: str | None = None
     screenshot_after_b64: str | None = None
     llm_reasoning: str | None = None
+    # PER-36: RAG verification verdict for the destination screen.
+    # Optional dict — see Edge.rag_verdict_json for the shape.
+    rag_verdict_json: dict | None = None
 
     # log / error
     message: str | None = None

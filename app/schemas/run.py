@@ -143,6 +143,9 @@ class EdgeRead(BaseModel):
     screenshot_before_path: str | None = None
     screenshot_after_path: str | None = None
     llm_reasoning: str | None = None
+    # PER-36: per-step RAG verdict — the UI shows ✓/⚠/✗ next to the
+    # action and a tooltip with the matched snippet.
+    rag_verdict_json: dict | None = None
     created_at: datetime
 
 

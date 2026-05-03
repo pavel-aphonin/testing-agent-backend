@@ -184,6 +184,11 @@ class Edge(Base):
     screenshot_before_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     screenshot_after_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PER-36: RAG verdict for the post-action observation. Shape:
+    #   {"matched": bool, "score": float, "snippet": str,
+    #    "document_id": str | null, "document_title": str | null}
+    # NULL when RAG was disabled / unreachable (legacy behaviour).
+    rag_verdict_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

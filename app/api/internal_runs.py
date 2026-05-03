@@ -287,6 +287,7 @@ async def post_run_event(
             screenshot_before_path=before_path,
             screenshot_after_path=after_path,
             llm_reasoning=event.llm_reasoning,
+            rag_verdict_json=event.rag_verdict_json,  # PER-36
         )
         session.add(edge)
 
