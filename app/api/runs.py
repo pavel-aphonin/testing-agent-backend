@@ -300,6 +300,56 @@ async def get_run_diff(
     return await diff_runs(session, run_id, against)
 
 
+@router.get("/{run_id}/screens/{screen_hash}/elements")
+async def get_screen_elements(
+    run_id: UUID,
+    screen_hash: str,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Return the full ``elements_json`` snapshot for one screen (PER-38).
+
+    Lazy-loaded by the ScreenDetailDrawer so the main /results payload
+    stays light (a 200-screen run × 50 elements would push 5+ MB into
+    every page open). Returns ``{"elements": [...]}`` so the wrapper
+    is forward-compatible with future per-screen extras (e.g. layout
+    metadata, defect counts).
+    """
+    result = await session.execute(select(Run).where(Run.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not _has_perm(user, "users.view") and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your run")
+
+    screen_result = await session.execute(
+        select(Screen).where(
+            Screen.run_id == run_id, Screen.screen_id_hash == screen_hash
+        )
+    )
+    screen = screen_result.scalar_one_or_none()
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Screen not found")
+    # ``elements_json`` is JSON column — already a list at the ORM level;
+    # wrap defensively in case worker stored it as the legacy single-dict
+    # shape on older runs.
+    raw = screen.elements_json
+    if raw is None:
+        elements: list = []
+    elif isinstance(raw, list):
+        elements = raw
+    elif isinstance(raw, dict) and "elements" in raw:
+        elements = raw["elements"]
+    else:
+        elements = []
+    return {
+        "screen_hash": screen.screen_id_hash,
+        "name": screen.name,
+        "screenshot_path": screen.screenshot_path,
+        "elements": elements,
+    }
+
+
 @router.get("/{run_id}/screens/{screen_hash}/screenshot")
 async def get_screen_screenshot(
     run_id: UUID,
