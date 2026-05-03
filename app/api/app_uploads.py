@@ -13,6 +13,7 @@ references the upload_id. This lets the frontend show immediate feedback
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import plistlib
@@ -60,12 +61,25 @@ def _read_ios_bundle_info(app_dir: Path) -> tuple[str, str]:
     return bundle_id, app_name
 
 
+def _extract_zip(raw_path: Path, extract_dir: Path) -> None:
+    """Pure-sync zip extraction — wrapped in asyncio.to_thread by the
+    handler so it doesn't block the event loop on big builds (PER-47)."""
+    if not zipfile.is_zipfile(raw_path):
+        raise ValueError("File is not a valid zip archive")
+    with zipfile.ZipFile(raw_path, "r") as zf:
+        zf.extractall(extract_dir)
+
+
 def _read_android_package(apk_path: Path) -> tuple[str, str]:
     """Extract (package, app_name) from an APK's AndroidManifest.xml.
 
     We try ``aapt2 dump badging`` first (fast, reliable). If aapt2 is
     not available (e.g. backend running in Docker), we fall back to
     reading the binary manifest via a simplified parser.
+
+    Synchronous — the upload handler dispatches it via
+    ``asyncio.to_thread`` (PER-47) so subprocess + zip parsing don't
+    freeze the event loop.
     """
     import subprocess
 
@@ -149,25 +163,35 @@ async def upload_app(
 
     upload_id = str(uuid4())
     upload_dir = Path(settings.app_uploads_dir) / upload_id
+    # mkdir is synchronous but cheap (one stat + one mkdir syscall) —
+    # not worth the to_thread overhead.
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     raw_path = upload_dir / file.filename
-    raw_path.write_bytes(content)
+    # PER-47: write_bytes is sync I/O — for an 8MB build it stalls the
+    # event loop ~50ms+, blocking parallel WebSocket frames and run
+    # polling. Punt to the default thread pool.
+    await asyncio.to_thread(raw_path.write_bytes, content)
 
     try:
         if ext == ".apk":
             # Android: no extraction needed
-            bundle_id, app_name = _read_android_package(raw_path)
+            # PER-47: _read_android_package shells out to aapt2 + reads
+            # the apk's binary XML — both blocking, push to thread pool.
+            bundle_id, app_name = await asyncio.to_thread(
+                _read_android_package, raw_path
+            )
             app_relative_path = f"{upload_id}/{file.filename}"
             platform = "android"
         else:
             # iOS: .zip or .ipa — both are zip archives containing a .app
-            if not zipfile.is_zipfile(raw_path):
-                raise HTTPException(400, "File is not a valid zip archive")
-
             extract_dir = upload_dir / "extracted"
-            with zipfile.ZipFile(raw_path, "r") as zf:
-                zf.extractall(extract_dir)
+            try:
+                # PER-47: zipfile.extractall on an 8MB simulator build
+                # spends ~100-300ms in CPU+disk. Off-loop.
+                await asyncio.to_thread(_extract_zip, raw_path, extract_dir)
+            except ValueError as ve:
+                raise HTTPException(400, str(ve))
 
             app_bundle = _find_app_bundle(extract_dir)
             if app_bundle is None:
@@ -177,13 +201,19 @@ async def upload_app(
                     "For iOS Simulator builds, zip the .app directory directly.",
                 )
 
-            bundle_id, app_name = _read_ios_bundle_info(app_bundle)
+            # plistlib.load is sync file I/O + parser — short but counts.
+            bundle_id, app_name = await asyncio.to_thread(
+                _read_ios_bundle_info, app_bundle
+            )
 
             # Move the .app to the top level of the upload dir for easy access
             final_app_path = upload_dir / app_bundle.name
             if final_app_path.exists():
-                shutil.rmtree(final_app_path)
-            shutil.move(str(app_bundle), str(final_app_path))
+                await asyncio.to_thread(shutil.rmtree, final_app_path)
+            # shutil.move on a directory tree blocks for the whole walk.
+            await asyncio.to_thread(
+                shutil.move, str(app_bundle), str(final_app_path)
+            )
 
             app_relative_path = f"{upload_id}/{app_bundle.name}"
             platform = "ios"
@@ -197,7 +227,9 @@ async def upload_app(
             "app_relative_path": app_relative_path,
             "original_filename": file.filename,
         }
-        (upload_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+        await asyncio.to_thread(
+            (upload_dir / "meta.json").write_text, json.dumps(meta, indent=2)
+        )
 
         logger.info(
             "App uploaded: %s → %s (%s, %s)",
@@ -218,7 +250,7 @@ async def upload_app(
         raise
     except Exception as exc:
         # Clean up on failure
-        shutil.rmtree(upload_dir, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, upload_dir, ignore_errors=True)
         logger.exception("App upload failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
