@@ -353,3 +353,67 @@ async def report_simulator_config(
         payload.model_dump_json(),
     )
     return {"accepted": True}
+
+
+# PER-XX: worker-token-protected RAG query endpoint.
+#
+# /api/admin/knowledge/query is admin-only by design. ScenarioRunner
+# (PER-37) needs run-time RAG to verify expected_result against linked
+# spec documents — but it has only a worker token, not an admin JWT.
+# Expose the same vector lookup under /api/internal/runs/knowledge-query.
+@router.post("/knowledge-query", dependencies=[Depends(require_worker_token)])
+async def worker_knowledge_query(
+    payload: dict,
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> dict:
+    """Top-K similar chunks for the worker's RAG verification.
+
+    Body: ``{"query": str, "top_k": int = 5, "document_ids": list[UUID]}``.
+    Returns ``{"matches": [{...}, ...]}`` — same shape as the admin
+    endpoint, minus the LLM answer (worker only needs the chunks).
+    """
+    from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
+    from app.services.embedding import EmbeddingClient
+
+    query_text = (payload.get("query") or "").strip()
+    if not query_text:
+        raise HTTPException(status_code=422, detail="query is required")
+    top_k = int(payload.get("top_k") or 5)
+    doc_ids = payload.get("document_ids") or None
+
+    embedder = EmbeddingClient()
+    try:
+        result = await embedder.embed([query_text])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    distance = KnowledgeChunk.embedding.cosine_distance(
+        result.vectors[0]
+    ).label("distance")
+    stmt = (
+        select(
+            KnowledgeChunk.id, KnowledgeChunk.document_id,
+            KnowledgeChunk.chunk_idx, KnowledgeChunk.text,
+            KnowledgeDocument.title, distance,
+        )
+        .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
+    )
+    if doc_ids:
+        from uuid import UUID as _UUID
+        stmt = stmt.where(KnowledgeChunk.document_id.in_([_UUID(d) for d in doc_ids]))
+    stmt = stmt.order_by(distance).limit(top_k)
+    rows = (await session.execute(stmt)).all()
+    return {
+        "embedding_model": result.model_name,
+        "matches": [
+            {
+                "chunk_id": str(r.id),
+                "document_id": str(r.document_id),
+                "chunk_idx": r.chunk_idx,
+                "text": r.text,
+                "document_title": r.title,
+                "distance": float(r.distance),
+            }
+            for r in rows
+        ],
+    }

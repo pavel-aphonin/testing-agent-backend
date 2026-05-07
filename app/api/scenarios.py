@@ -82,6 +82,13 @@ async def create_scenario(
         steps_json=payload.steps_json,
         created_by_user_id=user.id,
         workspace_id=payload.workspace_id,
+        # PER-35: link to specific RAG documents so the worker scopes
+        # spec-verification to them (None/empty = whole workspace corpus).
+        rag_document_ids=(
+            [str(d) for d in payload.rag_document_ids]
+            if payload.rag_document_ids
+            else None
+        ),
     )
     session.add(scenario)
     await session.commit()

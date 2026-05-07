@@ -14,6 +14,15 @@ EventType = Literal[
     "log",
     "error",
     "stats_update",
+    # PER-18 scenario runner — broadcast-only (not persisted to DB).
+    # Frontend renders these as a richer alternative to `log` events,
+    # so the user sees scenario progress live. Names match the exact
+    # strings worker emits in scenario_runner.py.
+    "scenario.started",
+    "scenario.step_started",
+    "scenario.step_completed",
+    "scenario.step_failed",
+    "scenario.finished",
 ]
 
 
