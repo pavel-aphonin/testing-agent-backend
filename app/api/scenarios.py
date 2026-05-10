@@ -14,12 +14,48 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import ValidationError
+
 from app.auth.users import current_active_user, require_tester
 from app.db import get_async_session
 from app.models.scenario import Scenario
 from app.models.user import User
 from app.schemas.scenario import ScenarioCreate, ScenarioRead, ScenarioUpdate
+from app.schemas.scenario_graph import normalize as _normalize_graph
 from app.services.scenario_validator import find_unresolved_placeholders
+
+
+def normalize_graph(steps_json: dict | None) -> dict:
+    """Wrapper that converts pydantic ValidationError into HTTP 400.
+
+    The normalizer itself raises a regular ``ValidationError`` for
+    malformed v2 input (e.g. multiple start nodes). FastAPI does not
+    auto-translate exceptions raised inside our own code, so we have to
+    convert here to keep responses informative.
+
+    ``exc.errors()`` includes a ``ctx.error`` field which holds the
+    original ``ValueError`` instance — that's not JSON-serializable, so
+    we project the errors down to the safe fields the UI cares about.
+    """
+    try:
+        return _normalize_graph(steps_json)
+    except ValidationError as exc:
+        clean_errors = [
+            {
+                "type": e.get("type"),
+                "loc": list(e.get("loc", [])),
+                "msg": e.get("msg"),
+            }
+            for e in exc.errors()
+        ]
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_scenario_graph",
+                "message": "Граф сценария невалиден",
+                "errors": clean_errors,
+            },
+        ) from exc
 
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 
@@ -33,7 +69,18 @@ async def _check_placeholders(
     the steps doesn't resolve in the target workspace's TestData.
     Raises HTTPException(400) with a list of missing keys so the UI
     can highlight them. See PER-21."""
-    steps = (steps_json or {}).get("steps") if steps_json else None
+    # PER-80: payload may be either the legacy ``{"steps": [...]}`` or
+    # the new graph ``{"nodes": [...]}``. Build a list of step dicts
+    # the validator can scan, regardless of shape.
+    raw = steps_json or {}
+    if isinstance(raw.get("nodes"), list):
+        steps = [
+            n.get("data") or {}
+            for n in raw["nodes"]
+            if isinstance(n, dict) and n.get("type") == "action"
+        ]
+    else:
+        steps = raw.get("steps") if isinstance(raw.get("steps"), list) else None
     missing = await find_unresolved_placeholders(session, workspace_id, steps)
     if missing:
         raise HTTPException(
@@ -70,7 +117,14 @@ async def list_scenarios(
         q = q.where(Scenario.workspace_id == workspace_id)
     q = q.order_by(Scenario.created_at.desc())
     result = await session.execute(q)
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    # PER-80: belt-and-suspenders. The migration converts every row
+    # at upgrade time, but if anything slipped through (e.g. a row
+    # written by an older deploy in flight) we still want clients to
+    # only ever see graph-shaped payloads.
+    for s in items:
+        s.steps_json = normalize_graph(s.steps_json)
+    return items
 
 
 @router.post(
@@ -84,11 +138,15 @@ async def create_scenario(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Scenario:
-    await _check_placeholders(session, payload.workspace_id, payload.steps_json)
+    # PER-80: clients (and the legacy frontend) may still POST flat v1
+    # ``{"steps": [...]}`` payloads. Always normalize to the graph
+    # shape before persisting so the rest of the system never sees v1.
+    graph_steps = normalize_graph(payload.steps_json)
+    await _check_placeholders(session, payload.workspace_id, graph_steps)
     scenario = Scenario(
         title=payload.title,
         description=payload.description,
-        steps_json=payload.steps_json,
+        steps_json=graph_steps,
         created_by_user_id=user.id,
         workspace_id=payload.workspace_id,
         # PER-68: new scenarios are always inactive. Explicit activation
@@ -121,6 +179,8 @@ async def get_scenario(
     scenario = result.scalar_one_or_none()
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    # PER-80: same belt-and-suspenders as the list endpoint.
+    scenario.steps_json = normalize_graph(scenario.steps_json)
     return scenario
 
 
@@ -143,6 +203,10 @@ async def update_scenario(
         raise HTTPException(status_code=404, detail="Scenario not found")
 
     patch = payload.model_dump(exclude_unset=True)
+    # PER-80: incoming steps_json may be v1 or v2 — normalize before
+    # storage and validation so the rest of the system never sees v1.
+    if "steps_json" in patch:
+        patch["steps_json"] = normalize_graph(patch["steps_json"])
     # If the patch touches steps_json (or workspace_id) — re-validate
     # placeholders against the *new* state. Use the fresh value where
     # provided, fall back to the existing one otherwise.

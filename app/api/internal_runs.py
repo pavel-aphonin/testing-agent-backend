@@ -110,6 +110,7 @@ async def claim_next_pending_run(
     scenarios: list[dict] = []
     if run.scenario_ids:
         from app.models.scenario import Scenario
+        from app.schemas.scenario_graph import is_v2 as _is_v2
         from uuid import UUID as _UUID
         sc_rows = (
             await session.execute(
@@ -124,10 +125,29 @@ async def claim_next_pending_run(
             s = sc_by_id.get(sid)
             if s is None:
                 continue
+            steps_raw = s.steps_json or {}
+            # PER-80 transitional: until the worker (PER-81) walks the
+            # graph natively, flatten v2 into a linear list of action
+            # node payloads so the existing scenario_runner keeps working.
+            # Branches/loops will look like a depth-first linearization
+            # which is wrong for them — the runner will just execute
+            # actions in whatever order they appear. Authors of branched
+            # scenarios will only get correct semantics once PER-81 ships.
+            if _is_v2(steps_raw):
+                flat_steps = [
+                    n.get("data") or {}
+                    for n in steps_raw.get("nodes", [])
+                    if isinstance(n, dict) and n.get("type") == "action"
+                ]
+            else:
+                flat_steps = steps_raw.get("steps", [])
             scenarios.append({
                 "id": str(s.id),
                 "title": s.title,
-                "steps": (s.steps_json or {}).get("steps", []),
+                "steps": flat_steps,
+                # Forwarded as-is so PER-81 can switch to graph traversal
+                # without another backend change.
+                "graph": steps_raw if _is_v2(steps_raw) else None,
                 # PER-35: scope RAG verification to the linked spec
                 # documents (empty list = whole workspace corpus).
                 "rag_document_ids": [str(d) for d in (s.rag_document_ids or [])],
