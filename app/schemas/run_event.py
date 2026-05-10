@@ -23,6 +23,12 @@ EventType = Literal[
     "scenario.step_completed",
     "scenario.step_failed",
     "scenario.finished",
+    # PER-81 graph traversal — emitted when the runner walks past a
+    # node type whose semantics aren't fully wired yet (decision /
+    # wait / screen_check / loop_back) or when a back-edge has been
+    # crossed too many times. Broadcast-only, not persisted.
+    "scenario.node_skipped",
+    "scenario.loop_exceeded",
 ]
 
 
