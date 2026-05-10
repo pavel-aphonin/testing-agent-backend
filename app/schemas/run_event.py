@@ -29,6 +29,9 @@ EventType = Literal[
     # crossed too many times. Broadcast-only, not persisted.
     "scenario.node_skipped",
     "scenario.loop_exceeded",
+    # PER-85 — emitted when the LLM screen-match decides the live
+    # screen does not match the user's description. Broadcast-only.
+    "scenario.screen_mismatch",
 ]
 
 
