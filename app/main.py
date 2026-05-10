@@ -28,6 +28,7 @@ from app.api import run_mirror as run_mirror_api
 from app.api import profile as profile_api
 from app.api import run_ws as run_ws_api
 from app.api import runs as runs_api
+from app.api import scenario_shapes as scenario_shapes_api
 from app.api import scenarios as scenarios_api
 from app.api import test_data as test_data_api
 from app.api import worker_status as worker_status_api
@@ -135,6 +136,7 @@ app = FastAPI(
         {"name": "auth", "description": "Аутентификация (JWT)."},
         {"name": "runs", "description": "Запуски исследования приложений."},
         {"name": "scenarios", "description": "Сценарии тестирования."},
+        {"name": "scenario-shapes", "description": "Палитра фигур визуального редактора сценариев."},
         {"name": "test-data", "description": "Тестовые данные для подстановки в сценарии."},
         {"name": "defects", "description": "Найденные агентом дефекты."},
         {"name": "workspaces", "description": "Рабочие пространства (команды / проекты)."},
@@ -208,6 +210,7 @@ app.include_router(hf_models_api.router)
 app.include_router(knowledge_api.router)
 app.include_router(run_mirror_api.router)
 app.include_router(scenarios_api.router)
+app.include_router(scenario_shapes_api.router)
 app.include_router(test_data_api.router)
 app.include_router(defects_api.public_router)
 app.include_router(defects_api.internal_router)

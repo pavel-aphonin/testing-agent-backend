@@ -118,25 +118,61 @@ async def claim_next_pending_run(
     linked_scenarios: list[dict] = []
     if run.scenario_ids:
         from app.models.scenario import Scenario
+        from app.models.scenario_shape import ScenarioShape
         from app.schemas.scenario_graph import is_v2 as _is_v2
         from uuid import UUID as _UUID
+
+        # PER-90: resolve shape_code → category + action_code for the
+        # worker. Pre-load all shapes once (small table) so the
+        # serializer can fill in ``data.action`` and override
+        # ``node.type`` for nodes that came in with only a
+        # ``data.shape_code`` reference. The worker stays oblivious to
+        # the dictionary itself — it only sees the resolved category /
+        # action verb.
+        shape_rows = (
+            await session.execute(select(ScenarioShape))
+        ).scalars().all()
+        shape_by_code: dict[str, ScenarioShape] = {s.code: s for s in shape_rows}
+
+        def _resolve_shape(node: dict) -> dict:
+            data = dict(node.get("data") or {})
+            code = (data.get("shape_code") or node.get("type") or "").strip()
+            shape = shape_by_code.get(code) if code else None
+            if shape is None:
+                return node
+            # Action verb: prefer per-node override, then shape default.
+            if shape.category == "action" and not data.get("action"):
+                if shape.action_code:
+                    data["action"] = shape.action_code
+            return {
+                **node,
+                # The worker dispatches on ``type`` (== category).
+                "type": shape.category or node.get("type"),
+                "data": data,
+            }
 
         def _serialize(s: Scenario) -> dict:
             steps_raw = s.steps_json or {}
             if _is_v2(steps_raw):
+                resolved_nodes = [
+                    _resolve_shape(n) if isinstance(n, dict) else n
+                    for n in steps_raw.get("nodes", [])
+                ]
+                resolved_graph = {**steps_raw, "nodes": resolved_nodes}
                 flat_steps = [
                     n.get("data") or {}
-                    for n in steps_raw.get("nodes", [])
+                    for n in resolved_nodes
                     if isinstance(n, dict) and n.get("type") == "action"
                 ]
             else:
+                resolved_graph = None
                 flat_steps = steps_raw.get("steps", [])
             return {
                 "id": str(s.id),
                 "title": s.title,
                 "steps": flat_steps,
                 # Forwarded as-is so the runner walks the graph natively.
-                "graph": steps_raw if _is_v2(steps_raw) else None,
+                "graph": resolved_graph,
                 # PER-35: scope RAG verification to the linked spec
                 # documents (empty list = whole workspace corpus).
                 "rag_document_ids": [str(d) for d in (s.rag_document_ids or [])],
