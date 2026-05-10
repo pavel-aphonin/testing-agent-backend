@@ -32,6 +32,11 @@ EventType = Literal[
     # PER-85 — emitted when the LLM screen-match decides the live
     # screen does not match the user's description. Broadcast-only.
     "scenario.screen_mismatch",
+    # PER-86 — sub-scenario lifecycle. The runner emits these when it
+    # enters and leaves a linked scenario triggered by a sub_scenario
+    # node, so the timeline can show the nested run as a group.
+    "scenario.sub_started",
+    "scenario.sub_finished",
 ]
 
 
@@ -103,6 +108,10 @@ class RunClaimResponse(BaseModel):
     # `value` may contain {{test_data.key}} placeholders that the worker
     # substitutes from `test_data` before sending the action.
     scenarios: list[dict] = []
+    # PER-86: library of scenarios pulled in by sub_scenario nodes in
+    # the entry-point scenarios. Worker uses these only to resolve
+    # sub_scenario calls — they are NOT executed standalone.
+    linked_scenarios: list[dict] = []
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

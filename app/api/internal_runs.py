@@ -107,32 +107,22 @@ async def claim_next_pending_run(
 
     # Expand scenario IDs into full step payloads. The worker walks these
     # before falling back to free exploration.
+    #
+    # PER-86: a scenario can reference other scenarios via ``sub_scenario``
+    # nodes. We pull in every such referenced scenario transitively and
+    # ship it under ``linked_scenarios`` so the runner can resolve the
+    # call without an extra round-trip. The top-level ``scenarios`` list
+    # stays the entry-point list — the runner runs only those, and only
+    # consults ``linked_scenarios`` to resolve sub_scenario calls.
     scenarios: list[dict] = []
+    linked_scenarios: list[dict] = []
     if run.scenario_ids:
         from app.models.scenario import Scenario
         from app.schemas.scenario_graph import is_v2 as _is_v2
         from uuid import UUID as _UUID
-        sc_rows = (
-            await session.execute(
-                select(Scenario)
-                .where(Scenario.id.in_([_UUID(sid) for sid in run.scenario_ids]))
-                .where(Scenario.is_active.is_(True))
-            )
-        ).scalars().all()
-        # Preserve the order the user specified, not DB order.
-        sc_by_id = {str(s.id): s for s in sc_rows}
-        for sid in run.scenario_ids:
-            s = sc_by_id.get(sid)
-            if s is None:
-                continue
+
+        def _serialize(s: Scenario) -> dict:
             steps_raw = s.steps_json or {}
-            # PER-80 transitional: until the worker (PER-81) walks the
-            # graph natively, flatten v2 into a linear list of action
-            # node payloads so the existing scenario_runner keeps working.
-            # Branches/loops will look like a depth-first linearization
-            # which is wrong for them — the runner will just execute
-            # actions in whatever order they appear. Authors of branched
-            # scenarios will only get correct semantics once PER-81 ships.
             if _is_v2(steps_raw):
                 flat_steps = [
                     n.get("data") or {}
@@ -141,17 +131,76 @@ async def claim_next_pending_run(
                 ]
             else:
                 flat_steps = steps_raw.get("steps", [])
-            scenarios.append({
+            return {
                 "id": str(s.id),
                 "title": s.title,
                 "steps": flat_steps,
-                # Forwarded as-is so PER-81 can switch to graph traversal
-                # without another backend change.
+                # Forwarded as-is so the runner walks the graph natively.
                 "graph": steps_raw if _is_v2(steps_raw) else None,
                 # PER-35: scope RAG verification to the linked spec
                 # documents (empty list = whole workspace corpus).
                 "rag_document_ids": [str(d) for d in (s.rag_document_ids or [])],
-            })
+            }
+
+        def _referenced_ids(steps_raw: dict) -> set[str]:
+            if not isinstance(steps_raw, dict):
+                return set()
+            out: set[str] = set()
+            for n in steps_raw.get("nodes", []):
+                if isinstance(n, dict) and n.get("type") == "sub_scenario":
+                    target = ((n.get("data") or {}).get("linked_scenario_id") or "").strip()
+                    if target:
+                        out.add(target)
+            return out
+
+        # First pass: load entry-point rows.
+        sc_rows = (
+            await session.execute(
+                select(Scenario)
+                .where(Scenario.id.in_([_UUID(sid) for sid in run.scenario_ids]))
+                .where(Scenario.is_active.is_(True))
+            )
+        ).scalars().all()
+        sc_by_id = {str(s.id): s for s in sc_rows}
+        # Preserve the order the user specified, not DB order.
+        entry_ids: list[str] = []
+        for sid in run.scenario_ids:
+            if sid in sc_by_id:
+                entry_ids.append(sid)
+                scenarios.append(_serialize(sc_by_id[sid]))
+
+        # Transitive sub-scenario closure. We walk the graph of
+        # ``sub_scenario`` references breadth-first; load each new id
+        # in one query and follow the chain. Cap the depth so a
+        # malicious / mis-edited graph can't pull thousands of rows.
+        seen: set[str] = set(entry_ids)
+        frontier: set[str] = set()
+        for s in sc_rows:
+            frontier |= _referenced_ids(s.steps_json or {})
+        frontier -= seen
+        depth = 0
+        while frontier and depth < 10:
+            depth += 1
+            try:
+                new_uuids = [_UUID(x) for x in frontier]
+            except ValueError:
+                break
+            new_rows = (
+                await session.execute(
+                    select(Scenario)
+                    .where(Scenario.id.in_(new_uuids))
+                    .where(Scenario.is_active.is_(True))
+                )
+            ).scalars().all()
+            next_frontier: set[str] = set()
+            for s in new_rows:
+                sid = str(s.id)
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                linked_scenarios.append(_serialize(s))
+                next_frontier |= _referenced_ids(s.steps_json or {})
+            frontier = next_frontier - seen
 
     return RunClaimResponse(
         run_id=run.id,
@@ -170,6 +219,10 @@ async def claim_next_pending_run(
         test_data=test_data,
         # Pre-scripted scenarios to execute before free exploration
         scenarios=scenarios,
+        # Library of scenarios referenced via sub_scenario nodes;
+        # never executed standalone, only resolved when a node calls
+        # into one. Worker mixes both into its by-id lookup table.
+        linked_scenarios=linked_scenarios,
         # Property-based testing of form validation
         pbt_enabled=run.pbt_enabled,
         # PER-40 / PER-41: pre-recorded action chain to play back
