@@ -47,6 +47,8 @@ NodeType = Literal[
     "wait",
     "screen_check",
     "loop_back",
+    "sub_scenario",
+    "group",
 ]
 
 
@@ -78,7 +80,17 @@ class ScenarioNode(BaseModel):
     #   wait: {ms}
     #   screen_check: {screen_description}
     #   loop_back: {max_iterations}
+    #   sub_scenario: {linked_scenario_id, linked_scenario_title?}
+    #   group: {label?} — purely visual container
     data: dict[str, Any] = Field(default_factory=dict)
+    # Group support — when set, the node renders inside the group with
+    # this id. The worker ignores groups entirely; they're a layout
+    # device. ``None`` means top-level.
+    parentId: str | None = None
+    # Optional explicit dimensions, mostly used by group bounding boxes
+    # whose size the user picks. Regular shape nodes auto-size.
+    width: float | None = None
+    height: float | None = None
 
 
 # ---------------------------------------------------------------- edges
