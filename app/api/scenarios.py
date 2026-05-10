@@ -82,6 +82,10 @@ async def create_scenario(
         steps_json=payload.steps_json,
         created_by_user_id=user.id,
         workspace_id=payload.workspace_id,
+        # PER-68: new scenarios are always inactive. Explicit activation
+        # via PATCH is required so a freshly-created stub doesn't get
+        # picked up by an in-flight run before the user has reviewed it.
+        is_active=False,
         # PER-35: link to specific RAG documents so the worker scopes
         # spec-verification to them (None/empty = whole workspace corpus).
         rag_document_ids=(
@@ -139,6 +143,42 @@ async def update_scenario(
             patch.get("workspace_id", scenario.workspace_id),
             patch.get("steps_json", scenario.steps_json),
         )
+    # PER-68: deactivating a scenario that's referenced by a pending
+    # or running run would leave the worker without a script mid-flight.
+    # Refuse with 409 + the offending run IDs so the user can cancel
+    # them first. ``scenario_ids`` is a JSON list[str], so we filter
+    # in Python — the table is small enough that this is fine.
+    if "is_active" in patch and scenario.is_active and patch["is_active"] is False:
+        from app.models.run import Run, RunStatus
+        rows = (
+            await session.execute(
+                select(Run.id, Run.title, Run.scenario_ids).where(
+                    Run.scenario_ids.isnot(None),
+                    Run.status.in_(
+                        [RunStatus.PENDING.value, RunStatus.RUNNING.value]
+                    ),
+                )
+            )
+        ).all()
+        sid_str = str(scenario_id)
+        blocking = [
+            (str(rid), title)
+            for rid, title, sids in rows
+            if sids and sid_str in sids
+        ]
+        if blocking:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "scenario_in_use",
+                    "message": (
+                        "Сценарий используется в активных прогонах: "
+                        + ", ".join(t or rid[:8] for rid, t in blocking)
+                        + ". Отмените их прежде чем деактивировать сценарий."
+                    ),
+                    "run_ids": [rid for rid, _ in blocking],
+                },
+            )
     for field, value in patch.items():
         setattr(scenario, field, value)
 
@@ -163,5 +203,19 @@ async def delete_scenario(
     scenario = result.scalar_one_or_none()
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    # PER-68: don't let users delete an active scenario without first
+    # deactivating it. Deletion of an active scenario could orphan
+    # in-flight or queued runs that point to it.
+    if scenario.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "scenario_active",
+                "message": (
+                    "Сначала отключите сценарий — активный сценарий "
+                    "удалить нельзя, чтобы не оборвать запуски."
+                ),
+            },
+        )
     await session.delete(scenario)
     await session.commit()

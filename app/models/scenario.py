@@ -40,7 +40,10 @@ class Scenario(Base):
         index=True,
     )
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # PER-68: scenarios start INACTIVE — explicit user activation required.
+    # Prevents a half-built scenario from being picked up by an in-flight
+    # run before the user has saved + reviewed.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
