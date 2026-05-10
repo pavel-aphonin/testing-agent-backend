@@ -54,9 +54,18 @@ async def list_scenarios(
     _user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID | None = None,
+    only_active: bool = False,
 ) -> list[Scenario]:
-    """List active scenarios. Filtered by workspace if provided."""
-    q = select(Scenario).where(Scenario.is_active.is_(True))
+    """List scenarios.
+
+    By default returns BOTH active and inactive scenarios — the admin UI
+    needs to see everything in order to flip the activation toggle. The
+    worker (and any other consumer that wants only runnable scenarios)
+    passes ``only_active=true``. Filtered by workspace if provided.
+    """
+    q = select(Scenario)
+    if only_active:
+        q = q.where(Scenario.is_active.is_(True))
     if workspace_id is not None:
         q = q.where(Scenario.workspace_id == workspace_id)
     q = q.order_by(Scenario.created_at.desc())
