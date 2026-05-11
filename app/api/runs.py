@@ -122,6 +122,14 @@ async def create_run_v2(
     The worker will create a fresh simulator/AVD, install the uploaded
     app, launch it, and tear it down after the run completes.
     """
+    # PER-106 #2: validate workspace membership before doing anything.
+    # Without this a tester could pass an arbitrary workspace_id and
+    # create a run there — the worker would then load that workspace's
+    # test_data, leaking credentials into a run the tester shouldn't
+    # see.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, payload.workspace_id)
+
     # Verify the app upload exists
     meta_path = Path(settings.app_uploads_dir) / payload.app_file_id / "meta.json"
     if not meta_path.exists():

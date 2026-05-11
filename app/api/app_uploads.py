@@ -169,6 +169,22 @@ async def upload_app(
             f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
+    # PER-106 #1: the worker has an AndroidEmulatorManager that can
+    # boot an emulator, but it then instantiates AXeExplorerClient
+    # (iOS-only — uses ``xcrun simctl``). An .apk upload would create
+    # a run that the worker cannot execute correctly. Refuse the
+    # upload here with a clear message until an Android controller
+    # is implemented. Removing the option from the dropdown is paired
+    # with a frontend change.
+    if ext == ".apk":
+        raise HTTPException(
+            400,
+            "Android (.apk) is not yet supported end-to-end. The worker "
+            "can boot an Android emulator but the UI driver is iOS-only "
+            "(AXe via xcrun simctl). Upload .app.zip or .ipa for iOS, "
+            "or wait for the Android controller (PER-106 #1) to ship.",
+        )
+
     # Read entire file into memory for size check
     content = await file.read()
     if len(content) > settings.app_max_upload_bytes:

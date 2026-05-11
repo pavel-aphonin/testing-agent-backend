@@ -25,11 +25,18 @@ router = APIRouter(prefix="/api/test-data", tags=["test-data"])
 
 @router.get("", response_model=list[TestDataRead])
 async def list_test_data(
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID | None = None,
 ) -> list[TestData]:
-    """List test data entries. Filtered by workspace if provided."""
+    """List test data entries. Filtered by workspace if provided.
+
+    PER-106 #2: requires workspace membership when ``workspace_id`` is
+    set — previously any caller could read any workspace's test data
+    by passing its id.
+    """
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, workspace_id)
     q = select(TestData)
     if workspace_id is not None:
         q = q.where(TestData.workspace_id == workspace_id)
@@ -49,6 +56,9 @@ async def create_test_data(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> TestData:
+    # PER-106 #2: enforce workspace ownership on create.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, payload.workspace_id)
     entry = TestData(
         key=payload.key,
         value=payload.value,
@@ -71,7 +81,7 @@ async def create_test_data(
 async def update_test_data(
     entry_id: UUID,
     payload: TestDataUpdate,
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> TestData:
     result = await session.execute(
@@ -81,7 +91,16 @@ async def update_test_data(
     if entry is None:
         raise HTTPException(status_code=404, detail="Test data entry not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    # PER-106 #2: enforce workspace ownership on update — both the
+    # existing entry's workspace and the new one if the patch tries
+    # to move the entry between workspaces.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, entry.workspace_id)
+    patch = payload.model_dump(exclude_unset=True)
+    if "workspace_id" in patch and patch["workspace_id"] != entry.workspace_id:
+        await require_workspace_membership(session, user, patch["workspace_id"])
+
+    for field, value in patch.items():
         setattr(entry, field, value)
 
     await session.commit()
@@ -96,7 +115,7 @@ async def update_test_data(
 )
 async def delete_test_data(
     entry_id: UUID,
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> None:
     result = await session.execute(
@@ -105,5 +124,8 @@ async def delete_test_data(
     entry = result.scalar_one_or_none()
     if entry is None:
         raise HTTPException(status_code=404, detail="Test data entry not found")
+    # PER-106 #2: enforce workspace membership on delete.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, entry.workspace_id)
     await session.delete(entry)
     await session.commit()

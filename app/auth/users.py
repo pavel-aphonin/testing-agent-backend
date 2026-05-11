@@ -110,3 +110,66 @@ def require_permission(*perms: str):
 require_viewer = require_permission("runs.view")
 require_tester = require_permission("runs.view", "runs.create")
 require_admin = require_permission("users.view")
+
+
+# ── Workspace access guard ───────────────────────────────────────────────────
+# PER-106 #2/#3/#4: every workspace-scoped resource (runs / scenarios /
+# test_data / knowledge / dashboards) must verify that the requesting
+# user is a member of the workspace before listing, reading, creating,
+# updating, or deleting. Several routers were filtering by ``workspace_id``
+# without that check — a tester could pass a different workspace_id and
+# read or write into it.
+#
+# Single helper, used everywhere, so the policy stays in one place and
+# is easy to audit. Returns True/False rather than raising so callers
+# can decide between 403 and 404 depending on whether they want to hide
+# the workspace's existence.
+
+
+async def is_workspace_member(
+    session,
+    user_id: "UUID",
+    workspace_id: "UUID",
+) -> bool:
+    """True if ``user_id`` belongs to ``workspace_id`` as a member.
+
+    Admins (superusers) are members of every workspace by definition —
+    short-circuit to True. Non-admins must have an explicit
+    ``workspace_members`` row.
+    """
+    from sqlalchemy import select
+    from app.models.user import User as UserModel
+    from app.models.workspace import WorkspaceMember
+
+    user = await session.get(UserModel, user_id)
+    if user is None:
+        return False
+    if user.is_superuser:
+        return True
+    stmt = select(WorkspaceMember).where(
+        WorkspaceMember.user_id == user_id,
+        WorkspaceMember.workspace_id == workspace_id,
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
+async def require_workspace_membership(
+    session,
+    user: "User",
+    workspace_id: "UUID | None",
+) -> None:
+    """Raise 403 if the caller does not belong to ``workspace_id``.
+
+    ``workspace_id=None`` is treated as "no workspace requested" and
+    short-circuits to allow — callers wanting to forbid the workspace-
+    less case should check explicitly.
+    """
+    if workspace_id is None:
+        return
+    ok = await is_workspace_member(session, user.id, workspace_id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this workspace",
+        )

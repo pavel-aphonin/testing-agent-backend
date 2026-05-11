@@ -98,7 +98,7 @@ async def _check_placeholders(
 
 @router.get("", response_model=list[ScenarioRead])
 async def list_scenarios(
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID | None = None,
     only_active: bool = False,
@@ -109,7 +109,13 @@ async def list_scenarios(
     needs to see everything in order to flip the activation toggle. The
     worker (and any other consumer that wants only runnable scenarios)
     passes ``only_active=true``. Filtered by workspace if provided.
+
+    PER-106 #2: requires workspace membership when ``workspace_id`` is
+    set — previously the filter was applied without checking that the
+    caller belongs to the workspace.
     """
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, workspace_id)
     q = select(Scenario)
     if only_active:
         q = q.where(Scenario.is_active.is_(True))
@@ -138,6 +144,9 @@ async def create_scenario(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Scenario:
+    # PER-106 #2: enforce workspace ownership on create.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, payload.workspace_id)
     # PER-80: clients (and the legacy frontend) may still POST flat v1
     # ``{"steps": [...]}`` payloads. Always normalize to the graph
     # shape before persisting so the rest of the system never sees v1.
@@ -170,7 +179,7 @@ async def create_scenario(
 @router.get("/{scenario_id}", response_model=ScenarioRead)
 async def get_scenario(
     scenario_id: UUID,
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Scenario:
     result = await session.execute(
@@ -179,6 +188,9 @@ async def get_scenario(
     scenario = result.scalar_one_or_none()
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    # PER-106 #2: enforce workspace ownership on read.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, scenario.workspace_id)
     # PER-80: same belt-and-suspenders as the list endpoint.
     scenario.steps_json = normalize_graph(scenario.steps_json)
     return scenario
@@ -192,7 +204,7 @@ async def get_scenario(
 async def update_scenario(
     scenario_id: UUID,
     payload: ScenarioUpdate,
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Scenario:
     result = await session.execute(
@@ -202,7 +214,15 @@ async def update_scenario(
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
+    # PER-106 #2: enforce workspace ownership on update.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, scenario.workspace_id)
+
     patch = payload.model_dump(exclude_unset=True)
+    # If the patch tries to move the scenario to a different workspace,
+    # the caller must be a member of the destination workspace too.
+    if "workspace_id" in patch and patch["workspace_id"] != scenario.workspace_id:
+        await require_workspace_membership(session, user, patch["workspace_id"])
     # PER-80: incoming steps_json may be v1 or v2 — normalize before
     # storage and validation so the rest of the system never sees v1.
     if "steps_json" in patch:
@@ -267,7 +287,7 @@ async def update_scenario(
 )
 async def delete_scenario(
     scenario_id: UUID,
-    _user: Annotated[User, Depends(current_active_user)],
+    user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> None:
     result = await session.execute(
@@ -276,6 +296,9 @@ async def delete_scenario(
     scenario = result.scalar_one_or_none()
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    # PER-106 #2: enforce workspace ownership on delete.
+    from app.auth.users import require_workspace_membership
+    await require_workspace_membership(session, user, scenario.workspace_id)
     # PER-68: don't let users delete an active scenario without first
     # deactivating it. Deletion of an active scenario could orphan
     # in-flight or queued runs that point to it.
