@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,7 +49,40 @@ class Settings(BaseSettings):
     # Worker (explorer daemon running on the host)
     # Workers send WORKER_TOKEN as a Bearer token to /api/internal/* endpoints.
     # Generate with: openssl rand -hex 32
-    worker_token: str = "change_me_worker_token_long_random_string"
+    #
+    # NO public default. The previous placeholder was a P1 security
+    # finding (PER-104) — any environment that didn't override the env
+    # var would have left /api/internal/* protected by a known string.
+    # Empty here makes "config missing" explicit; the validator below
+    # refuses to load Settings without an env-supplied value.
+    worker_token: str = ""
+
+    @field_validator("worker_token")
+    @classmethod
+    def _worker_token_required(cls, v: str) -> str:
+        """Refuse to start without an explicit, non-placeholder token.
+
+        Rejects the historical placeholder value too, so a stale .env
+        carrying the old default fails loudly instead of silently
+        running with a publicly-known credential.
+        """
+        if not v or v.strip() == "":
+            raise ValueError(
+                "WORKER_TOKEN env var is required. Generate with "
+                "`openssl rand -hex 32` and set it in the backend's "
+                "environment. No default is supplied — this protects "
+                "/api/internal/* from accidental exposure."
+            )
+        if v == "change_me_worker_token_long_random_string":
+            raise ValueError(
+                "WORKER_TOKEN is set to the historical placeholder value. "
+                "Generate a real one with `openssl rand -hex 32` and "
+                "update the backend env. This check exists because the "
+                "placeholder leaked into infra/.env and worker CLI "
+                "defaults — leaving it in production would allow anyone "
+                "with the placeholder to call /api/internal/*."
+            )
+        return v
 
     # App uploads (shared volume with host worker)
     app_uploads_dir: str = "/var/lib/app-uploads"
