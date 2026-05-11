@@ -1,11 +1,14 @@
 """Text embedding client.
 
-Tries to call llama-server's OpenAI-compatible /v1/embeddings endpoint.
-If the LLM is unreachable (e.g. no model loaded yet), falls back to a
-deterministic hash-based pseudo-embedding so the rest of the RAG pipeline
-keeps working end-to-end during local development. The fallback is
-clearly marked as fake in logs and in the document's `embedding_model`
-column so the operator can re-embed once a real model is available.
+Calls llama-server's OpenAI-compatible /v1/embeddings endpoint with
+three attempts and 2 / 4 / 6 s back-off. On final failure raises a
+``RuntimeError`` — callers are expected to surface a clear error to
+the operator rather than continue with degenerate vectors. A previous
+version had a deterministic hash-based fallback embedding for offline
+development; it was removed because the resulting "embeddings" made
+similarity scores meaningless and silently corrupted the pgvector
+index. The dev workflow now requires a real embedding server (the
+host-side llama-server on ``:8083`` in our default setup).
 
 The chunker is a deliberate dumb sliding window: split on whitespace,
 group ~CHUNK_SIZE tokens, slide by CHUNK_SIZE - CHUNK_OVERLAP. This is
@@ -16,7 +19,6 @@ because (a) it's good enough for the demo, (b) it has zero deps, and
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import math
 from dataclasses import dataclass
@@ -82,29 +84,8 @@ def _normalize(vec: list[float]) -> list[float]:
     return [v / norm for v in vec]
 
 
-def _fake_embedding(text: str) -> list[float]:
-    """Deterministic pseudo-embedding from SHA-256 of the text.
-
-    This is NOT a real semantic embedding. It exists so the pipeline runs
-    end-to-end without llama-server being up. Cosine similarity between
-    fake embeddings is meaningless beyond exact-match collisions, so the
-    retrieval results in fake mode will essentially be "did you upload
-    the same text" — which is exactly what we want for a smoke test.
-    """
-    digest = hashlib.sha256(text.encode("utf-8")).digest()
-    floats: list[float] = []
-    while len(floats) < EMBEDDING_DIM:
-        for b in digest:
-            floats.append((b / 255.0) * 2.0 - 1.0)
-            if len(floats) >= EMBEDDING_DIM:
-                break
-        # Re-hash to extend
-        digest = hashlib.sha256(digest).digest()
-    return _normalize(floats[:EMBEDDING_DIM])
-
-
 class EmbeddingClient:
-    """OpenAI-compatible embeddings client with a hash fallback."""
+    """OpenAI-compatible embeddings client. Raises on persistent failure."""
 
     def __init__(
         self,

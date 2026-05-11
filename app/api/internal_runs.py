@@ -464,7 +464,7 @@ async def report_simulator_config(
     return {"accepted": True}
 
 
-# PER-XX: worker-token-protected RAG query endpoint.
+# Worker-token-protected RAG query endpoint.
 #
 # /api/admin/knowledge/query is admin-only by design. ScenarioRunner
 # (PER-37) needs run-time RAG to verify expected_result against linked

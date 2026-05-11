@@ -13,14 +13,20 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://redis:6379/0"
 
-    # JWT
-    jwt_secret: str = "change_me"
+    # JWT — empty default + validator below, same policy as worker_token.
+    # A previous placeholder "change_me" was a P1 security finding
+    # (PER-106 #8) because environments that didn't override the env
+    # var would have signed tokens with a publicly-known secret.
+    jwt_secret: str = ""
     jwt_access_token_expires_min: int = 15
     jwt_refresh_token_expires_days: int = 7
 
-    # Initial admin (created by seed on first startup if no users exist)
-    initial_admin_email: str = "admin@example.com"
-    initial_admin_password: str = "change_me"
+    # Initial admin (created by seed on first startup if no users exist).
+    # Both fields must be explicit — placeholders / common-defaults are
+    # rejected by the validators below to force the operator to choose
+    # a real address and password rather than ship the seed defaults.
+    initial_admin_email: str = ""
+    initial_admin_password: str = ""
 
     # LLM (chat completions) — used by the agent during exploration.
     # Default points at Gemma (small, fast, multimodal with mmproj).
@@ -57,6 +63,68 @@ class Settings(BaseSettings):
     # refuses to load Settings without an env-supplied value.
     worker_token: str = ""
 
+    @field_validator("jwt_secret")
+    @classmethod
+    def _jwt_secret_required(cls, v: str) -> str:
+        """Reject empty / placeholder JWT signing keys.
+
+        Same policy as worker_token (PER-106 #8): an unset env should
+        fail loudly at boot rather than ship with a known-publicly
+        secret. Generate with ``openssl rand -hex 32``.
+        """
+        if not v or v.strip() == "":
+            raise ValueError(
+                "JWT_SECRET env var is required. Generate with "
+                "`openssl rand -hex 32` and set it in the backend's "
+                "environment. No default is supplied — this protects "
+                "issued JWTs from being signed with a known key."
+            )
+        if v in ("change_me", "change_me_to_a_32_byte_hex_string"):
+            raise ValueError(
+                "JWT_SECRET is set to a historical placeholder value. "
+                "Generate a real one with `openssl rand -hex 32`."
+            )
+        if len(v) < 32:
+            raise ValueError(
+                "JWT_SECRET must be at least 32 characters. Generate "
+                "with `openssl rand -hex 32` (produces 64 hex chars)."
+            )
+        return v
+
+    @field_validator("initial_admin_email")
+    @classmethod
+    def _admin_email_required(cls, v: str) -> str:
+        if not v or v.strip() == "":
+            raise ValueError(
+                "INITIAL_ADMIN_EMAIL env var is required. The first-run "
+                "seed creates a single admin account with this email; "
+                "shipping a default like 'admin@example.com' would make "
+                "every fresh deployment guessable."
+            )
+        if v == "admin@example.com":
+            raise ValueError(
+                "INITIAL_ADMIN_EMAIL is the placeholder 'admin@example.com'. "
+                "Use a real address you control."
+            )
+        return v
+
+    @field_validator("initial_admin_password")
+    @classmethod
+    def _admin_password_required(cls, v: str) -> str:
+        if not v or v.strip() == "":
+            raise ValueError(
+                "INITIAL_ADMIN_PASSWORD env var is required. The "
+                "first-run seed creates the admin with this password; "
+                "the seed used to default to 'change_me' (PER-106 #8)."
+            )
+        if v in ("change_me", "admin", "password", "123456"):
+            raise ValueError(
+                "INITIAL_ADMIN_PASSWORD is a common placeholder. "
+                "Pick something non-obvious — `openssl rand -base64 24` "
+                "is a reasonable starting point."
+            )
+        return v
+
     @field_validator("worker_token")
     @classmethod
     def _worker_token_required(cls, v: str) -> str:
@@ -90,9 +158,10 @@ class Settings(BaseSettings):
 
     # RAG / embeddings
     # Which model name (as registered with llama-swap) to ask for
-    # text embeddings. If the LLM is unreachable, the EmbeddingClient
-    # falls back to a deterministic hash-based embedding so the rest of
-    # the pipeline keeps working — this is clearly marked as fake in logs.
+    # text embeddings. EmbeddingClient retries the embedding endpoint
+    # three times and then raises if it stays unreachable — the
+    # previous hash-based fallback was removed because silently-fake
+    # vectors corrupted similarity scores in pgvector.
     embedding_model_name: str = "embeddings"
     embedding_request_timeout_sec: float = 10.0
 

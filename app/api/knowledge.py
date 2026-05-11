@@ -2,12 +2,14 @@
 
 Admin-only endpoints for uploading reference documents that the agent
 can query during exploration runs. Documents are split into ~500-token
-chunks, each chunk is embedded via the LLM (or a hash fallback), and
-embeddings are stored in pgvector.
+chunks, each chunk is embedded via the LLM embedding endpoint, and
+embeddings are stored in pgvector. The previous "hash fallback" path
+was removed when it became clear silently-meaningless embeddings
+corrupted the index — embedding failures now raise.
 
-The query endpoint is admin-only for the demo so we keep blast radius
-contained. Once we wire actual run-time RAG queries from the explorer,
-we'll add a worker-token-protected variant under /api/internal/.
+The admin query endpoint is paired with a worker-token-protected
+variant under /api/internal/runs/knowledge-query that ScenarioRunner
+uses at run-time to verify expected_result against linked specs.
 """
 
 from __future__ import annotations

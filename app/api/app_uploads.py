@@ -146,7 +146,23 @@ async def upload_app(
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
-    ext = Path(file.filename).suffix.lower()
+    # PER-106 #6: the client-supplied multipart filename was used
+    # directly as ``upload_dir / file.filename``. A crafted name like
+    # ``../../escape.apk`` writes outside the upload directory; later
+    # ``app_relative_path`` carries the same string into the worker
+    # which joins it with ``uploads_base`` and installs from it.
+    # Mitigation:
+    #   1. Reduce to a basename (drops any path separators).
+    #   2. Reject control characters / non-ASCII path operators.
+    #   3. Verify the resolved path still lives under upload_dir
+    #      after pathlib resolves any remaining "." / ".." tokens.
+    safe_name = Path(file.filename).name  # strips directory components
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(400, "Invalid filename")
+    if any(ord(c) < 32 for c in safe_name) or "/" in safe_name or "\\" in safe_name:
+        raise HTTPException(400, "Invalid filename — control characters or separators")
+
+    ext = Path(safe_name).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             400,
@@ -162,12 +178,21 @@ async def upload_app(
         )
 
     upload_id = str(uuid4())
-    upload_dir = Path(settings.app_uploads_dir) / upload_id
+    uploads_root = Path(settings.app_uploads_dir).resolve()
+    upload_dir = uploads_root / upload_id
     # mkdir is synchronous but cheap (one stat + one mkdir syscall) —
     # not worth the to_thread overhead.
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_path = upload_dir / file.filename
+    raw_path = (upload_dir / safe_name).resolve()
+    # Defence in depth — even though safe_name is already a basename
+    # and upload_dir is uniquely per-upload, double-check the final
+    # path doesn't escape the configured uploads root. ``resolve()``
+    # follows any sneaky symlinks too.
+    try:
+        raw_path.relative_to(uploads_root)
+    except ValueError:
+        raise HTTPException(400, "Invalid filename — path escapes uploads root")
     # PER-47: write_bytes is sync I/O — for an 8MB build it stalls the
     # event loop ~50ms+, blocking parallel WebSocket frames and run
     # polling. Punt to the default thread pool.
@@ -181,7 +206,7 @@ async def upload_app(
             bundle_id, app_name = await asyncio.to_thread(
                 _read_android_package, raw_path
             )
-            app_relative_path = f"{upload_id}/{file.filename}"
+            app_relative_path = f"{upload_id}/{safe_name}"
             platform = "android"
         else:
             # iOS: .zip or .ipa — both are zip archives containing a .app
@@ -225,7 +250,7 @@ async def upload_app(
             "app_name": app_name,
             "platform": platform,
             "app_relative_path": app_relative_path,
-            "original_filename": file.filename,
+            "original_filename": safe_name,
         }
         await asyncio.to_thread(
             (upload_dir / "meta.json").write_text, json.dumps(meta, indent=2)
@@ -233,7 +258,7 @@ async def upload_app(
 
         logger.info(
             "App uploaded: %s → %s (%s, %s)",
-            file.filename,
+            safe_name,
             bundle_id,
             platform,
             upload_id,
