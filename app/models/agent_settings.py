@@ -25,7 +25,7 @@ class AgentSettings(Base):
         nullable=False,
     )
 
-    default_mode: Mapped[str] = mapped_column(String(20), default="hybrid", nullable=False)
+    default_mode: Mapped[str] = mapped_column(String(20), default="ai", nullable=False)
     default_llm_model_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("llm_models.id", ondelete="SET NULL"),

@@ -14,7 +14,7 @@ class RunCreate(BaseModel):
     bundle_id: str = Field(..., min_length=1, max_length=200)
     device_id: str = Field(..., min_length=1, max_length=200)
     platform: str = Field(default="ios", max_length=20)
-    mode: str = Field(default=RunMode.HYBRID.value)
+    mode: str = Field(default=RunMode.AI.value)
     max_steps: int = Field(default=200, ge=1, le=10000)
     c_puct: float = Field(default=2.0, ge=0.0, le=10.0)
     rollout_depth: int = Field(default=5, ge=0, le=100)
@@ -31,7 +31,7 @@ class RunCreateV2(BaseModel):
     app_file_id: str = Field(..., min_length=1, max_length=200)
     # Device config ID from the admin-curated list (GET /api/devices)
     device_config_id: UUID
-    mode: str = Field(default=RunMode.HYBRID.value)
+    mode: str = Field(default=RunMode.AI.value)
     max_steps: int = Field(default=200, ge=1, le=10000)
     c_puct: float = Field(default=2.0, ge=0.0, le=10.0)
     rollout_depth: int = Field(default=5, ge=0, le=100)

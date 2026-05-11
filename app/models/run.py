@@ -66,7 +66,7 @@ class Run(Base):
     platform: Mapped[str] = mapped_column(String(20), default="ios", nullable=False)
 
     # Configuration
-    mode: Mapped[str] = mapped_column(String(20), default=RunMode.HYBRID.value, nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), default=RunMode.AI.value, nullable=False)
     llm_model_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("llm_models.id", ondelete="SET NULL"),
