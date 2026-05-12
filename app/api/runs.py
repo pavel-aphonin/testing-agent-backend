@@ -39,6 +39,31 @@ def _has_perm(user: User, perm: str) -> bool:
     return perm in user.permissions
 
 
+async def _can_access_run(
+    user: User, run: Run, session: AsyncSession
+) -> bool:
+    """Permission gate for per-run endpoints.
+
+    PER-106 #3: a tester can see runs in any workspace they're a member
+    of, not just runs they personally created. The previous gate only
+    let admins or the run owner through, which made shared dashboards
+    useless for teammates.
+
+    Returns True if the caller is:
+        * a global admin (``users.view`` permission), or
+        * the user who originally created the run, or
+        * a member of the run's workspace (when the run has one).
+    """
+    if _has_perm(user, "users.view"):
+        return True
+    if run.user_id == user.id:
+        return True
+    if run.workspace_id is not None:
+        from app.auth.users import is_workspace_member
+        return await is_workspace_member(session, user.id, run.workspace_id)
+    return False
+
+
 @router.get("", response_model=list[RunRead])
 async def list_runs(
     user: Annotated[User, Depends(current_active_user)],
@@ -47,27 +72,37 @@ async def list_runs(
 ) -> list[Run]:
     """List runs.
 
-    If `workspace_id` query param is set, returns only runs in that
-    workspace (and the caller must be a member). Otherwise returns
-    runs the caller created (admins see all).
+    PER-106 #3: visibility is "admin sees all, otherwise you see runs
+    you created OR runs in any workspace you belong to". Previously the
+    no-filter branch only returned own-runs which silently hid teammates'
+    work even though detail endpoints were happy to serve it.
+
+    If ``workspace_id`` is supplied, narrow to that workspace and verify
+    membership up front so we can return a clean 403 instead of an empty
+    list.
     """
     q = select(Run).order_by(Run.created_at.desc())
 
     if workspace_id is not None:
         # Verify membership unless admin
-        if not _has_perm(user, "users.view"):
-            from app.models.workspace import WorkspaceMember
-            mem_result = await session.execute(
-                select(WorkspaceMember).where(
-                    WorkspaceMember.workspace_id == workspace_id,
-                    WorkspaceMember.user_id == user.id,
-                )
-            )
-            if mem_result.scalar_one_or_none() is None:
-                raise HTTPException(403, "Not a member of this workspace")
+        from app.auth.users import require_workspace_membership
+        await require_workspace_membership(session, user, workspace_id)
         q = q.where(Run.workspace_id == workspace_id)
     elif not _has_perm(user, "users.view"):
-        q = q.where(Run.user_id == user.id)
+        # Own runs ∪ runs in any workspace I belong to.
+        from app.models.workspace import WorkspaceMember
+        ws_ids_result = await session.execute(
+            select(WorkspaceMember.workspace_id).where(
+                WorkspaceMember.user_id == user.id,
+            )
+        )
+        ws_ids = [row[0] for row in ws_ids_result.all()]
+        if ws_ids:
+            q = q.where(
+                (Run.user_id == user.id) | (Run.workspace_id.in_(ws_ids))
+            )
+        else:
+            q = q.where(Run.user_id == user.id)
 
     result = await session.execute(q)
     return list(result.scalars().all())
@@ -207,7 +242,7 @@ async def get_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
     return run
 
@@ -227,7 +262,7 @@ async def get_run_results(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
 
     screens_q = await session.execute(
@@ -264,7 +299,7 @@ async def get_edge_screenshot(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
 
     from app.models.run import Edge as _Edge
@@ -304,12 +339,12 @@ async def get_run_diff(
     cur = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
     if cur is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and cur.user_id != user.id:
+    if not await _can_access_run(user, cur, session):
         raise HTTPException(status_code=403, detail="Not your run")
     base = (await session.execute(select(Run).where(Run.id == against))).scalar_one_or_none()
     if base is None:
         raise HTTPException(status_code=404, detail="Baseline run not found")
-    if not _has_perm(user, "users.view") and base.user_id != user.id:
+    if not await _can_access_run(user, base, session):
         raise HTTPException(status_code=403, detail="Not your baseline run")
     from app.services.run_diff import diff_runs
     return await diff_runs(session, run_id, against)
@@ -385,7 +420,7 @@ async def replay_path(
     src = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
     if src is None:
         raise HTTPException(404, "Source run not found")
-    if not _has_perm(user, "users.view") and src.user_id != user.id:
+    if not await _can_access_run(user, src, session):
         raise HTTPException(403, "Not your run")
 
     from app.services.path_finder import edges_by_ids, serialize_action
@@ -461,7 +496,7 @@ async def start_from_screen(
     src = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
     if src is None:
         raise HTTPException(404, "Source run not found")
-    if not _has_perm(user, "users.view") and src.user_id != user.id:
+    if not await _can_access_run(user, src, session):
         raise HTTPException(403, "Not your run")
 
     from app.services.path_finder import find_path_to, serialize_action
@@ -533,7 +568,7 @@ async def get_screen_elements(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
 
     screen_result = await session.execute(
@@ -576,7 +611,7 @@ async def get_screen_screenshot(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
 
     screen_result = await session.execute(
@@ -609,7 +644,7 @@ async def cancel_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
     if not _has_perm(user, "runs.cancel"):
         raise HTTPException(status_code=403, detail="Missing runs.cancel permission")
@@ -651,7 +686,7 @@ async def delete_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _has_perm(user, "users.view") and run.user_id != user.id:
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
     if not _has_perm(user, "runs.delete"):
         raise HTTPException(status_code=403, detail="Missing runs.delete permission")

@@ -109,7 +109,11 @@ async def run_progress_ws(
         if run is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Run not found")
             return
-        if "users.view" not in (user.permissions or []) and run.user_id != user.id:
+        # PER-106 #3: WS visibility must match the HTTP gate — workspace
+        # members get to subscribe to live progress for any run in their
+        # workspace, not just runs they personally created.
+        from app.api.runs import _can_access_run
+        if not await _can_access_run(user, run, session):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Forbidden")
             return
 

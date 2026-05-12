@@ -32,10 +32,6 @@ internal_router = APIRouter(
 )
 
 
-def _is_admin(user: User) -> bool:
-    return user.role == "admin"
-
-
 @public_router.get("/{run_id}/defects", response_model=list[DefectRead])
 async def list_run_defects(
     run_id: UUID,
@@ -55,11 +51,16 @@ async def list_run_defects(
     Results are sorted by priority (P0 first) then by step order. The UI's
     Defects tab uses this for the triage workflow.
     """
-    # Authorization: admins see all, owners see their own.
+    # PER-106 #3: admins + workspace members + owner can see defects.
+    # The previous check compared ``user.role == "admin"`` directly,
+    # which is also out of date — the role system was replaced by
+    # explicit permissions, and a tester who's a member of the run's
+    # workspace should be able to triage defects there.
     run = (await session.execute(select(Run).where(Run.id == run_id))).scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if not _is_admin(user) and run.user_id != user.id:
+    from app.api.runs import _can_access_run
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
 
     stmt = select(DefectModel).where(DefectModel.run_id == run_id)

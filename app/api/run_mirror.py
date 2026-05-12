@@ -64,7 +64,10 @@ async def _check_run_visible(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if "users.view" not in (user.permissions or []) and run.user_id != user.id:
+    # PER-106 #3: align with the HTTP and WS gates — workspace members
+    # can view the live mirror, not just the run's creator.
+    from app.api.runs import _can_access_run
+    if not await _can_access_run(user, run, session):
         raise HTTPException(status_code=403, detail="Not your run")
     return run
 
