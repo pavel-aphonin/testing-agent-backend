@@ -21,6 +21,10 @@ class KnowledgeDocumentSummary(BaseModel):
     embedding_dim: int
     chunk_count: int
     uploaded_by_user_id: uuid.UUID
+    # PER-106 #4: surface the workspace so the UI can filter and badge
+    # cross-workspace docs distinctly. Legacy rows uploaded before the
+    # column was wired stay nullable.
+    workspace_id: uuid.UUID | None = None
     uploaded_at: datetime
 
 
@@ -37,6 +41,10 @@ class KnowledgeDocumentCreate(BaseModel):
     source_type: str = Field(default="text", pattern="^(text|markdown)$")
     content: str = Field(min_length=1)
     source_filename: str | None = Field(default=None, max_length=300)
+    # PER-106 #4: every new document must be pinned to a workspace.
+    # Without it the document leaks across tenants when the worker
+    # falls back to a corpus-wide search.
+    workspace_id: uuid.UUID
 
 
 class KnowledgeQuery(BaseModel):
@@ -49,6 +57,10 @@ class KnowledgeQuery(BaseModel):
     # instead of the whole workspace corpus, killing the "wrong-doc
     # shouts ‘matched’" failure mode.
     document_ids: list[uuid.UUID] | None = Field(default=None)
+    # PER-106 #4: optional broader scope when ``document_ids`` is not
+    # provided. The admin UI passes the currently-selected workspace
+    # so the "Test RAG" panel only searches that workspace's corpus.
+    workspace_id: uuid.UUID | None = Field(default=None)
 
 
 class KnowledgeMatch(BaseModel):

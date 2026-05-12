@@ -19,11 +19,11 @@ from typing import Annotated
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.users import require_admin
+from app.auth.users import require_admin, require_workspace_membership
 from app.db import get_async_session
 from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocument
 from app.models.user import User
@@ -45,10 +45,16 @@ router = APIRouter(prefix="/api/admin/knowledge", tags=["knowledge"])
 
 @router.get("/documents", response_model=list[KnowledgeDocumentSummary])
 async def list_documents(
-    _admin: Annotated[User, Depends(require_admin)],
+    admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID | None = None,
 ) -> list[KnowledgeDocument]:
+    # PER-106 #4: scope to the requested workspace + verify membership.
+    # ``require_admin`` already gates this endpoint, and admins are
+    # members of every workspace by definition (``is_workspace_member``
+    # short-circuits to True), so the call is effectively a no-op for
+    # them. The check matters once non-admin roles get knowledge access.
+    await require_workspace_membership(session, admin, workspace_id)
     q = select(KnowledgeDocument)
     if workspace_id is not None:
         q = q.where(KnowledgeDocument.workspace_id == workspace_id)
@@ -70,6 +76,10 @@ async def create_document(
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> KnowledgeDocument:
+    # PER-106 #4: refuse uploads to a workspace the caller doesn't
+    # belong to (admins pass the membership check trivially).
+    await require_workspace_membership(session, admin, payload.workspace_id)
+
     # 1. Chunk the text
     chunks = split_into_chunks(payload.content)
     if not chunks:
@@ -107,6 +117,7 @@ async def create_document(
         embedding_dim=embedding_result.dim,
         chunk_count=len(chunks),
         uploaded_by_user_id=admin.id,
+        workspace_id=payload.workspace_id,
     )
     session.add(document)
     await session.flush()  # populate document.id
@@ -138,14 +149,22 @@ async def upload_document_file(
     file: UploadFile,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    workspace_id: Annotated[UUID, Form()],
 ) -> KnowledgeDocument:
     """Upload a document file (PDF, DOCX, XLSX, PPTX, TXT, etc.).
 
     The server extracts text from the file, chunks it, embeds it, and
     stores it — same as the JSON endpoint but accepts any file format.
+
+    PER-106 #4: ``workspace_id`` is required so the uploaded corpus is
+    scoped from the start — there is no "global" knowledge tier.
     """
     if not file.filename:
         raise HTTPException(400, "Имя файла не указано")
+
+    # PER-106 #4: same membership check as the JSON variant. Admins
+    # pass trivially via the superuser short-circuit.
+    await require_workspace_membership(session, admin, workspace_id)
 
     content_bytes = await file.read()
     if len(content_bytes) > 50_000_000:  # 50 MB
@@ -190,6 +209,7 @@ async def upload_document_file(
         embedding_dim=embedding_result.dim,
         chunk_count=len(chunks),
         uploaded_by_user_id=admin.id,
+        workspace_id=workspace_id,
     )
     session.add(document)
     await session.flush()
@@ -217,7 +237,7 @@ async def upload_document_file(
 )
 async def get_document(
     document_id: UUID,
-    _admin: Annotated[User, Depends(require_admin)],
+    admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> KnowledgeDocument:
     result = await session.execute(
@@ -226,6 +246,10 @@ async def get_document(
     document = result.scalar_one_or_none()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    # PER-106 #4: enforce workspace membership for non-admin callers.
+    # Legacy documents without ``workspace_id`` stay readable for admins
+    # so they can backfill them.
+    await require_workspace_membership(session, admin, document.workspace_id)
     return document
 
 
@@ -235,14 +259,21 @@ async def get_document(
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: UUID,
-    _admin: Annotated[User, Depends(require_admin)],
+    admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> None:
-    result = await session.execute(
-        delete(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
-    )
-    if result.rowcount == 0:
+    # PER-106 #4: load first so we can verify workspace membership,
+    # then delete. The previous DELETE-by-id sidestepped any per-row
+    # authorisation.
+    doc = (
+        await session.execute(
+            select(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
+        )
+    ).scalar_one_or_none()
+    if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    await require_workspace_membership(session, admin, doc.workspace_id)
+    await session.delete(doc)
     await session.commit()
 
 
@@ -252,7 +283,7 @@ async def delete_document(
 )
 async def reembed_document(
     document_id: UUID,
-    _admin: Annotated[User, Depends(require_admin)],
+    admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> KnowledgeDocument:
     """Re-embed all chunks of a document with the current embedding model.
@@ -268,6 +299,9 @@ async def reembed_document(
     ).scalar_one_or_none()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    # PER-106 #4: same workspace membership check as the read/delete
+    # endpoints — re-embedding rewrites every chunk, mutating the doc.
+    await require_workspace_membership(session, admin, document.workspace_id)
 
     chunks = split_into_chunks(document.content)
     if not chunks:
@@ -404,7 +438,7 @@ async def _generate_answer(
 @router.post("/query", response_model=KnowledgeQueryResponse)
 async def query_knowledge_base(
     payload: KnowledgeQuery,
-    _admin: Annotated[User, Depends(require_admin)],
+    admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> KnowledgeQueryResponse:
     """Top-K similar chunks across all documents.
@@ -412,7 +446,15 @@ async def query_knowledge_base(
     Uses pgvector's `<=>` cosine distance operator. The HNSW index
     created in the migration makes this an ANN lookup; without it, this
     would still work but degrade to a sequential scan.
+
+    PER-106 #4: when ``workspace_id`` is set, scope the search to that
+    workspace's corpus. Mirrors the runtime worker query: an admin
+    testing RAG from inside a workspace context should see exactly
+    what the worker would see for runs in that workspace.
     """
+    # PER-106 #4: validate membership when a workspace filter is given
+    # (admins pass the check trivially via the superuser short-circuit).
+    await require_workspace_membership(session, admin, payload.workspace_id)
     embedder = EmbeddingClient()
     try:
         result = await embedder.embed([payload.query])
@@ -445,6 +487,12 @@ async def query_knowledge_base(
     # PER-35: scope the vector search to a doc allow-list when given.
     if payload.document_ids:
         stmt = stmt.where(KnowledgeChunk.document_id.in_(payload.document_ids))
+    # PER-106 #4: additionally narrow by workspace when supplied. The
+    # filters compose — passing both ``document_ids`` and ``workspace_id``
+    # is allowed and acts as a safety net (only docs in the requested
+    # workspace from the allow-list).
+    if payload.workspace_id is not None:
+        stmt = stmt.where(KnowledgeDocument.workspace_id == payload.workspace_id)
     stmt = stmt.order_by(distance).limit(retrieval_k)
     rows = (await session.execute(stmt)).all()
 

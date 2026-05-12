@@ -477,7 +477,20 @@ async def worker_knowledge_query(
 ) -> dict:
     """Top-K similar chunks for the worker's RAG verification.
 
-    Body: ``{"query": str, "top_k": int = 5, "document_ids": list[UUID]}``.
+    Body shape::
+
+        {
+          "query": str,                    # required
+          "top_k": int = 5,
+          "document_ids": list[UUID] | None,  # explicit allow-list
+          "run_id": UUID | None,           # PER-106 #4: workspace scope
+        }
+
+    PER-106 #4: the worker MUST narrow its search either to an explicit
+    ``document_ids`` list (typical for scenario-linked specs) or to the
+    workspace of ``run_id``. Without either we'd be doing a corpus-wide
+    search and matching against another tenant's documents.
+
     Returns ``{"matches": [{...}, ...]}`` — same shape as the admin
     endpoint, minus the LLM answer (worker only needs the chunks).
     """
@@ -489,6 +502,34 @@ async def worker_knowledge_query(
         raise HTTPException(status_code=422, detail="query is required")
     top_k = int(payload.get("top_k") or 5)
     doc_ids = payload.get("document_ids") or None
+    run_id_str = payload.get("run_id")
+
+    # Resolve workspace scope from the run, when present. The worker is
+    # always tied to a specific run, so this is essentially always set
+    # — but we accept ``document_ids`` alone for the legacy code path
+    # to keep older worker builds working.
+    workspace_id: UUID | None = None
+    if run_id_str:
+        try:
+            run_uuid = UUID(str(run_id_str))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="run_id must be a UUID")
+        run = (
+            await session.execute(select(Run).where(Run.id == run_uuid))
+        ).scalar_one_or_none()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        workspace_id = run.workspace_id
+
+    if not doc_ids and workspace_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "knowledge-query requires either document_ids or a "
+                "run_id with a workspace — corpus-wide RAG is not "
+                "allowed for worker queries"
+            ),
+        )
 
     embedder = EmbeddingClient()
     try:
@@ -510,6 +551,8 @@ async def worker_knowledge_query(
     if doc_ids:
         from uuid import UUID as _UUID
         stmt = stmt.where(KnowledgeChunk.document_id.in_([_UUID(d) for d in doc_ids]))
+    if workspace_id is not None:
+        stmt = stmt.where(KnowledgeDocument.workspace_id == workspace_id)
     stmt = stmt.order_by(distance).limit(top_k)
     rows = (await session.execute(stmt)).all()
     return {
