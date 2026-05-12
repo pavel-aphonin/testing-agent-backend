@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
-from app.auth.users import current_active_user, require_tester
+from app.auth.users import current_active_user, require_permission
 from app.config import settings
 from app.models.user import User
 from app.schemas.app_upload import AppUploadResponse
@@ -131,7 +131,10 @@ def _read_android_package(apk_path: Path) -> tuple[str, str]:
     "/app",
     response_model=AppUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_tester)],
+    # PER-106 #10: uploading a build is the first step of starting a
+    # run; require runs.create directly instead of the legacy tester
+    # bundle. Anyone who can start a run can upload its build.
+    dependencies=[Depends(require_permission("runs.create"))],
 )
 async def upload_app(
     file: UploadFile,

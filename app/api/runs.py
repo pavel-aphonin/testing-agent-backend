@@ -1,10 +1,14 @@
 """/api/runs — list, create, fetch, delete exploration runs.
 
-Permission rules:
-    - viewer/tester/admin can list and get their own runs
-    - admin can list and get any run
-    - tester/admin can create runs (viewer cannot)
-    - admin can delete any run; tester only their own; viewer cannot delete
+Permission rules (PER-106 #3, #10):
+    - viewing a single run requires either ``users.view`` (admin),
+      ownership, or membership in the run's workspace (handled by
+      ``_can_access_run`` further down).
+    - listing returns admin-sees-all, otherwise own runs ∪ runs in
+      any workspace the caller belongs to.
+    - creating requires ``runs.create``.
+    - cancelling additionally requires ``runs.cancel``.
+    - deleting additionally requires ``runs.delete``.
 """
 
 import json

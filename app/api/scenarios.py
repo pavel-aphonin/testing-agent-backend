@@ -1,8 +1,12 @@
 """/api/scenarios — CRUD for reusable test scenarios.
 
-Permission rules:
+Permission rules (PER-106 #10):
     - any authenticated user can list active scenarios and get one by id
-    - tester/admin can create, update, and delete scenarios
+    - create requires ``scenarios.create``
+    - update requires ``scenarios.edit``
+    - delete requires ``scenarios.delete``
+Resource-specific permissions instead of the old "tester/admin" role
+literal — see app/auth/users.py for the migration notes.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import ValidationError
 
-from app.auth.users import current_active_user, require_tester
+from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
 from app.models.scenario import Scenario
 from app.models.user import User
@@ -137,7 +141,11 @@ async def list_scenarios(
     "",
     response_model=ScenarioRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_tester)],
+    # PER-106 #10: scope-correct permission. Previously the endpoint
+    # gated on the runs.* tester bundle which conflated unrelated
+    # resources — a custom role with scenarios.create but no
+    # runs.create would have been blocked.
+    dependencies=[Depends(require_permission("scenarios.create"))],
 )
 async def create_scenario(
     payload: ScenarioCreate,
@@ -199,7 +207,7 @@ async def get_scenario(
 @router.patch(
     "/{scenario_id}",
     response_model=ScenarioRead,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("scenarios.edit"))],
 )
 async def update_scenario(
     scenario_id: UUID,
@@ -283,7 +291,7 @@ async def update_scenario(
 @router.delete(
     "/{scenario_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("scenarios.delete"))],
 )
 async def delete_scenario(
     scenario_id: UUID,

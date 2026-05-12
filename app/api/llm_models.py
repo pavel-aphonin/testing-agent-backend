@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.users import require_admin, require_viewer
+from app.auth.users import require_admin, require_permission
 from app.db import get_async_session
 from app.llm_swap import regenerate_swap_config
 from app.models.llm_model import LLMModel
@@ -163,10 +163,16 @@ async def delete_model(
 
 @public_router.get("", response_model=list[LLMModelPublicRead])
 async def list_active_models(
-    _user: Annotated[User, Depends(require_viewer)],
+    _user: Annotated[User, Depends(require_permission("models.view"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> list[LLMModel]:
-    """Return active models only — what testers see in the New Run dropdown."""
+    """Return active models only — what testers see in the New Run dropdown.
+
+    PER-106 #10: gated on ``models.view`` rather than the legacy
+    ``runs.view`` alias so a custom role that exposes models but not
+    runs (e.g. an "auditor" who picks a model for ad-hoc evaluation)
+    can still hit this endpoint.
+    """
     result = await session.execute(
         select(LLMModel)
         .where(LLMModel.is_active.is_(True))

@@ -102,13 +102,14 @@ def require_permission(*perms: str):
     return _guard
 
 
-# ── Legacy aliases ───────────────────────────────────────────────────────────
-# Keep these so existing router imports don't break during the migration
-# period. They'll be removed once all endpoints switch to require_permission.
-# Mapped to permissions that ONLY admin actually has (users.view).
+# ── Permission shortcuts ─────────────────────────────────────────────────────
+# PER-106 #10: the original ``require_viewer`` / ``require_tester``
+# aliases were removed once every router migrated to the resource-
+# specific permission codes (scenarios.create, test_data.edit, etc.).
+# ``require_admin`` remains because every admin-only endpoint is by
+# definition gated on the same ``users.view`` permission, and a single
+# named shortcut makes the intent obvious at the call site.
 
-require_viewer = require_permission("runs.view")
-require_tester = require_permission("runs.view", "runs.create")
 require_admin = require_permission("users.view")
 
 

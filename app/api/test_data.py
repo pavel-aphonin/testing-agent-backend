@@ -1,8 +1,12 @@
 """/api/test-data — CRUD for test data key-value pairs.
 
-Permission rules:
+Permission rules (PER-106 #10):
     - any authenticated user can list test data
-    - tester/admin can create, update, and delete
+    - create requires ``test_data.create``
+    - update requires ``test_data.edit``
+    - delete requires ``test_data.delete``
+Resource-specific permissions instead of the old "tester/admin" role
+literal — see app/auth/users.py for the migration notes.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.users import current_active_user, require_tester
+from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
 from app.models.test_data import TestData
 from app.models.user import User
@@ -49,7 +53,10 @@ async def list_test_data(
     "",
     response_model=TestDataRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_tester)],
+    # PER-106 #10: scope-correct permission, not the legacy runs.*
+    # tester bundle. Same access for the seeded roles, room for
+    # finer-grained custom roles later.
+    dependencies=[Depends(require_permission("test_data.create"))],
 )
 async def create_test_data(
     payload: TestDataCreate,
@@ -76,7 +83,7 @@ async def create_test_data(
 @router.patch(
     "/{entry_id}",
     response_model=TestDataRead,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("test_data.edit"))],
 )
 async def update_test_data(
     entry_id: UUID,
@@ -111,7 +118,7 @@ async def update_test_data(
 @router.delete(
     "/{entry_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_tester)],
+    dependencies=[Depends(require_permission("test_data.delete"))],
 )
 async def delete_test_data(
     entry_id: UUID,
