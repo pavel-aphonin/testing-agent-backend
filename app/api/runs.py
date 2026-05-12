@@ -181,6 +181,34 @@ async def create_run_v2(
     if not device_config.is_active:
         raise HTTPException(400, "This device configuration is disabled")
 
+    # PER-106 #5: resolve the LLM model for this run.
+    # Priority: explicit payload.llm_model_id → user's AgentSettings
+    # default_llm_model_id → None (worker falls back to env var).
+    # If a model is chosen, it must exist and be active.
+    from app.models.llm_model import LLMModel as _LLMModel
+    resolved_model_id = payload.llm_model_id
+    if resolved_model_id is None:
+        from app.models.agent_settings import AgentSettings
+        settings_row = (
+            await session.execute(
+                select(AgentSettings).where(AgentSettings.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if settings_row is not None:
+            resolved_model_id = settings_row.default_llm_model_id
+    if resolved_model_id is not None:
+        model_row = (
+            await session.execute(
+                select(_LLMModel).where(_LLMModel.id == resolved_model_id)
+            )
+        ).scalar_one_or_none()
+        if model_row is None:
+            raise HTTPException(400, "Selected LLM model not found")
+        if not model_row.is_active:
+            raise HTTPException(
+                400, "Selected LLM model is disabled. Pick another."
+            )
+
     run = Run(
         user_id=user.id,
         title=(payload.title or "").strip() or None,
@@ -188,6 +216,7 @@ async def create_run_v2(
         device_id="__PENDING__",  # populated by worker after sim creation
         platform=meta["platform"],
         mode=payload.mode,
+        llm_model_id=resolved_model_id,
         max_steps=payload.max_steps,
         c_puct=payload.c_puct,
         rollout_depth=payload.rollout_depth,

@@ -32,6 +32,12 @@ class RunCreateV2(BaseModel):
     # Device config ID from the admin-curated list (GET /api/devices)
     device_config_id: UUID
     mode: str = Field(default=RunMode.AI.value)
+    # PER-106 #5: which LLM the agent should drive this run with. None
+    # tells the backend to fall back to the user's AgentSettings
+    # default_llm_model_id. The resolved model is persisted on
+    # Run.llm_model_id and shipped to the worker via RunClaimResponse,
+    # so per-run model selection is finally honoured end-to-end.
+    llm_model_id: UUID | None = None
     max_steps: int = Field(default=200, ge=1, le=10000)
     c_puct: float = Field(default=2.0, ge=0.0, le=10.0)
     rollout_depth: int = Field(default=5, ge=0, le=100)
@@ -60,6 +66,11 @@ class RunRead(BaseModel):
     device_id: str
     platform: str
     mode: str
+    # PER-106 #5: surface the resolved model so the UI can show which
+    # model produced this run and so reruns can default to the same
+    # one. None on runs created before model selection was wired —
+    # the worker then falls back to its TA_LLM_MODEL_NAME env var.
+    llm_model_id: UUID | None = None
     status: str
     max_steps: int
     c_puct: float

@@ -238,6 +238,16 @@ async def claim_next_pending_run(
                 next_frontier |= _referenced_ids(s.steps_json or {})
             frontier = next_frontier - seen
 
+    # PER-106 #5: resolve the run's LLM model name so the worker knows
+    # which llama-swap routing key to use. None means "no per-run
+    # override" — the worker reads TA_LLM_MODEL_NAME from its env.
+    llm_model_name: str | None = None
+    if run.llm_model_id is not None:
+        from app.models.llm_model import LLMModel as _LLMModel
+        model = await session.get(_LLMModel, run.llm_model_id)
+        if model is not None and model.is_active:
+            llm_model_name = model.name
+
     return RunClaimResponse(
         run_id=run.id,
         bundle_id=run.bundle_id,
@@ -247,6 +257,7 @@ async def claim_next_pending_run(
         max_steps=run.max_steps,
         c_puct=run.c_puct,
         rollout_depth=run.rollout_depth,
+        llm_model_name=llm_model_name,
         # V2 simulator lifecycle fields
         device_type=run.device_type,
         os_version=run.os_version,

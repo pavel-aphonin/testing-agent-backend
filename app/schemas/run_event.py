@@ -92,6 +92,12 @@ class RunClaimResponse(BaseModel):
     max_steps: int
     c_puct: float
     rollout_depth: int
+    # PER-106 #5: which model the worker should send to llama-swap for
+    # this run. Resolved from Run.llm_model_id (which the backend filled
+    # in from RunCreateV2.llm_model_id or the user's AgentSettings
+    # default). None means "no override" — the worker uses its
+    # TA_LLM_MODEL_NAME env var as before.
+    llm_model_name: str | None = None
     # V2 auto-provisioning fields (None for legacy V1 runs)
     device_type: str | None = None
     os_version: str | None = None
