@@ -49,6 +49,18 @@ NodeType = Literal[
     "loop_back",
     "sub_scenario",
     "group",
+    # PER-110: high-level "цель" node — natural-language instruction
+    # ("Авторизуйся с этими данными", "Переведи 100 на счёт X"). The
+    # worker runs a mini LLM-loop on this node: look at the screen,
+    # decide one action, execute, repeat until the LLM reports the
+    # goal as done or ``max_steps`` is exhausted.
+    #
+    # data fields:
+    #   description: str           — what the agent must accomplish
+    #   expected_outcome: str?     — optional screen-state to verify
+    #                                 once the LLM declares done
+    #   max_steps: int = 15        — safety cap on the inner loop
+    "goal",
 ]
 
 
@@ -82,6 +94,7 @@ class ScenarioNode(BaseModel):
     #   loop_back: {max_iterations}
     #   sub_scenario: {linked_scenario_id, linked_scenario_title?}
     #   group: {label?} — purely visual container
+    #   goal: {description, expected_outcome?, max_steps?}
     data: dict[str, Any] = Field(default_factory=dict)
     # Group support — when set, the node renders inside the group with
     # this id. The worker ignores groups entirely; they're a layout
