@@ -30,6 +30,7 @@ from app.api import run_ws as run_ws_api
 from app.api import runs as runs_api
 from app.api import scenario_shapes as scenario_shapes_api
 from app.api import scenarios as scenarios_api
+from app.api import system_prompts as system_prompts_api
 from app.api import test_data as test_data_api
 from app.api import worker_status as worker_status_api
 from app.api import workspaces as workspaces_api
@@ -211,6 +212,8 @@ app.include_router(knowledge_api.router)
 app.include_router(run_mirror_api.router)
 app.include_router(scenarios_api.router)
 app.include_router(scenario_shapes_api.router)
+app.include_router(system_prompts_api.admin_router)
+app.include_router(system_prompts_api.internal_router)
 app.include_router(test_data_api.router)
 app.include_router(defects_api.public_router)
 app.include_router(defects_api.internal_router)

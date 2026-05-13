@@ -51,6 +51,7 @@ from app.models.user_table_pref import UserTablePref
 from app.models.role import Role
 from app.models.run import Edge, Run, RunMode, RunStatus, Screen
 from app.models.scenario import Scenario
+from app.models.system_prompt import SystemPrompt
 from app.models.test_data import TestData
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember, WsRole
@@ -89,6 +90,7 @@ __all__ = [
     "RunStatus",
     "Scenario",
     "Screen",
+    "SystemPrompt",
     "TestData",
     "User",
     "Workspace",
