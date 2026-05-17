@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import Boolean, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -55,6 +55,17 @@ class RefActionType(Base):
     platform_scope: Mapped[str] = mapped_column(String(50), default="universal", nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # PER-111 v2: JSON Schema for this action's args. Worker builds
+    # the dynamic response_format around it so the LLM physically
+    # cannot pick the action with wrong arguments. ``{}`` = action
+    # takes no args (default for tap / back / etc).
+    # Example for swipe:
+    #   {"type":"object","required":["direction"],
+    #    "properties":{"direction":{"type":"string",
+    #      "enum":["up","down","left","right"]}}}
+    arguments_schema: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
 
 
 class RefTestDataType(Base):

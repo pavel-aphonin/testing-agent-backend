@@ -135,6 +135,12 @@ class RunClaimResponse(BaseModel):
     # the entry-point scenarios. Worker uses these only to resolve
     # sub_scenario calls — they are NOT executed standalone.
     linked_scenarios: list[dict] = []
+    # PER-111 v2: enabled action types for this run's workspace,
+    # each with code / name / description / arguments_schema. Worker
+    # builds the goal-node response_format around this list so the
+    # LLM picks ``action`` from a real, editable dictionary instead
+    # of a hardcoded enum in code.
+    actions: list[dict] = []
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

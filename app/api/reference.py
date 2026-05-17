@@ -58,6 +58,21 @@ class ActionTypeRead(_RefBase):
     description: str | None = None
     platform_scope: str = "universal"
     is_system: bool = True
+    # PER-111 v2: JSON Schema for this action's args. ``{}`` means
+    # "no arguments". Worker uses this to build response_format so
+    # the LLM can't pick the action with wrong arguments. Admin edits
+    # via the reference UI flow through the same field.
+    arguments_schema: dict = {}
+
+
+class ActionTypeUpdate(BaseModel):
+    """PATCH payload for admin-edit of action types — only the fields
+    that can change at runtime. ``code`` / ``platform_scope`` /
+    ``is_system`` are immutable for system actions."""
+    name: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+    arguments_schema: dict | None = None
 
 
 class TestDataTypeRead(_RefBase):
@@ -91,6 +106,7 @@ class DeviceTypeCreate(_CreateBase):
 class ActionTypeCreate(_CreateBase):
     description: str | None = None
     platform_scope: str = "universal"
+    arguments_schema: dict = {}
 
 
 class TestDataTypeCreate(_CreateBase):

@@ -105,6 +105,45 @@ async def claim_next_pending_run(
     for key, value in td_rows:
         test_data.setdefault(key, value)
 
+    # PER-111 v2: ship the enabled action types with their
+    # arguments_schema so the worker can build response_format
+    # dynamically (enum of action names + oneOf of arg shapes).
+    # Workspace can disable system actions via
+    # ``workspace_action_settings``; respected here.
+    from app.models.reference import RefActionType, WorkspaceActionSetting
+    actions_q = await session.execute(
+        select(
+            RefActionType.code,
+            RefActionType.name,
+            RefActionType.description,
+            RefActionType.platform_scope,
+            RefActionType.arguments_schema,
+            WorkspaceActionSetting.is_enabled,
+        )
+        .outerjoin(
+            WorkspaceActionSetting,
+            (WorkspaceActionSetting.action_type_id == RefActionType.id)
+            & (WorkspaceActionSetting.workspace_id == run.workspace_id),
+        )
+        .where(RefActionType.is_active.is_(True))
+    )
+    actions: list[dict] = []
+    platform_lower = (run.platform or "").lower()
+    for code, name, descr, scope, args_schema, ws_enabled in actions_q.all():
+        # Respect workspace override; default-enabled when no row.
+        if ws_enabled is False:
+            continue
+        # Skip platform-specific actions that don't belong here
+        # (e.g. android "back" on an iOS run).
+        if scope not in ("universal", "", None) and scope != platform_lower:
+            continue
+        actions.append({
+            "code": code,
+            "name": name,
+            "description": descr or "",
+            "arguments_schema": args_schema or {},
+        })
+
     # Expand scenario IDs into full step payloads. The worker walks these
     # before falling back to free exploration.
     #
@@ -278,6 +317,8 @@ async def claim_next_pending_run(
         # explore (PER-41); replay_actions+max_steps==0 = replay
         # only (PER-40 with continue_after_replay=False).
         replay_actions=run.replay_actions_json or [],
+        # PER-111 v2: action dictionary for goal-node response_format.
+        actions=actions,
     )
 
 
