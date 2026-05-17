@@ -37,6 +37,10 @@ EventType = Literal[
     # node, so the timeline can show the nested run as a group.
     "scenario.sub_started",
     "scenario.sub_finished",
+    # PER-110 — inner action inside a goal node. Broadcast-only.
+    # Lets the timeline render what the LLM is actually doing inside
+    # a "Цель" step (one event per inner tap/input/back/swipe).
+    "scenario.goal_action",
 ]
 
 
@@ -79,6 +83,19 @@ class RunEventIn(BaseModel):
 
     # stats_update
     stats: dict | None = None
+
+    # PER-111: scenario.goal_action fields. Broadcast-only — the UI
+    # uses them to render what the LLM picked at each inner step of a
+    # goal node (so the timeline shows "input «Введите телефон» via
+    # test_data.phone" instead of an empty row). Persist nothing on
+    # the backend, just forward to redis_bus.
+    inner_step: int | None = None
+    action: str | None = None
+    element_label: str | None = None
+    value_source: str | None = None
+    reasoning: str | None = None
+    node_id: str | None = None
+    scenario_id: str | None = None
 
 
 class RunClaimResponse(BaseModel):

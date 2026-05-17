@@ -447,6 +447,15 @@ async def post_run_event(
             "success": event.success,
             "message": event.message,
             "stats": event.stats,
+            # PER-111: scenario.* payload — broadcast-only, no DB writes.
+            # The UI's timeline uses these to render goal-node activity.
+            "inner_step": event.inner_step,
+            "action": event.action,
+            "element_label": event.element_label,
+            "value_source": event.value_source,
+            "reasoning": event.reasoning,
+            "node_id": event.node_id,
+            "scenario_id": event.scenario_id,
         },
     )
 
