@@ -21,3 +21,4 @@ openpyxl>=3.1.0
 python-pptx>=0.6.0
 PyPDF2>=3.0.0
 odfpy>=1.4.0
+python-json-logger>=3.0.0

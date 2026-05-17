@@ -86,6 +86,13 @@ from app.seed import (
     seed_release_notes,
 )
 
+# PER-118: install JSON / plain log formatter before anything else
+# logs at module-import time. Idempotent — uvicorn-reload re-imports
+# main but our setup clears handlers each call.
+from app.logging_config import setup_logging  # noqa: E402
+
+setup_logging()
+
 logger = logging.getLogger(__name__)
 
 
