@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.users import current_active_user
 from app.config import settings
 from app.db import get_async_session
-from app.models.defect import DefectModel
+from app.models.defect import DefectModel, DefectPriorityRef
 from app.models.run import Run
 from app.models.scenario import Scenario
 from app.models.user import User
@@ -113,16 +113,25 @@ async def _load_run_context(run_id: UUID, session: AsyncSession) -> str:
             await session.execute(
                 select(DefectModel)
                 .where(DefectModel.run_id == run_id)
-                .order_by(DefectModel.priority.asc(), DefectModel.step_idx.asc())
+                # PER-120: order by the referenced priority's sort_order
+                # (most urgent first); .priority is now a relationship,
+                # not a string.
+                .join(DefectModel.priority)
+                .order_by(
+                    DefectPriorityRef.sort_order.asc(),
+                    DefectModel.step_idx.asc(),
+                )
                 .limit(20)
             )
-        ).scalars().all()
+        ).scalars().unique().all()
     )
 
-    # Counts by priority for the summary line.
+    # Counts by priority for the summary line. Key on the human-readable
+    # name so the digest reads "Срочный=2, Высокий=1" instead of UUIDs.
     counts: dict[str, int] = {}
     for d in defects:
-        counts[d.priority] = counts.get(d.priority, 0) + 1
+        label = d.priority.name if d.priority else "—"
+        counts[label] = counts.get(label, 0) + 1
 
     parts: list[str] = []
     parts.append(f"### Текущий запуск {run.id}")
@@ -136,7 +145,8 @@ async def _load_run_context(run_id: UUID, session: AsyncSession) -> str:
         summary = ", ".join(f"{p}={n}" for p, n in sorted(counts.items()))
         parts.append(f"\n### Найденные дефекты (показано {len(defects)}, всего: {summary})")
         for d in defects:
-            head = f"[{d.priority}/{d.kind}]"
+            prio_name = d.priority.name if d.priority else "—"
+            head = f"[{prio_name}/{d.kind}]"
             screen = f" на «{d.screen_name}»" if d.screen_name else ""
             step = f" (шаг {d.step_idx})" if d.step_idx is not None else ""
             parts.append(f"- {head} {d.title}{screen}{step}")

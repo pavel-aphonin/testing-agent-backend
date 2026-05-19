@@ -727,18 +727,24 @@ async def _runs_recent(session, ws_id, params):
 
 
 async def _defects_by_priority(session, ws_id, params):
+    # PER-120: priority is a FK to ref_defect_priorities. Use the
+    # reference row's `name` for the chart label and its `sort_order`
+    # for ordering so the chart matches the admin-edited scale.
     sql = text(
         """
-        SELECT d.priority, COUNT(*) FROM defects d
+        SELECT p.name AS prio_name, p.sort_order AS prio_order, COUNT(*) AS c
+        FROM defects d
         JOIN runs r ON r.id = d.run_id
+        JOIN ref_defect_priorities p ON p.id = d.priority_id
         WHERE r.workspace_id = :ws
-        GROUP BY d.priority ORDER BY d.priority
+        GROUP BY p.name, p.sort_order
+        ORDER BY p.sort_order
         """
     )
     rows = (await session.execute(sql, {"ws": str(ws_id)})).all()
     return {
-        "categories": [str(p or "—") for p, _ in rows],
-        "series": [{"name": "Дефекты", "data": [int(c) for _, c in rows]}],
+        "categories": [str(name or "—") for name, _so, _c in rows],
+        "series": [{"name": "Дефекты", "data": [int(c) for _n, _so, c in rows]}],
     }
 
 
@@ -780,19 +786,36 @@ async def _defects_by_day(session, ws_id, params):
 async def _defects_by_day_by_priority(session, ws_id, params):
     days = int(params.get("days", 14))
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    # PER-120: group by the reference row's code, label with name.
+    # priority_id is NOT NULL on defects so the "Без приоритета"
+    # fallback isn't needed any more — every row points at a real row.
     sql = text(
         """
         SELECT DATE_TRUNC('day', d.created_at AT TIME ZONE 'UTC') AS day,
-               COALESCE(d.priority, '—') AS g,
+               p.code AS g,
                COUNT(*) AS c
-        FROM defects d JOIN runs r ON r.id = d.run_id
+        FROM defects d
+        JOIN runs r ON r.id = d.run_id
+        JOIN ref_defect_priorities p ON p.id = d.priority_id
         WHERE r.workspace_id = :ws AND d.created_at >= :cutoff
-        GROUP BY day, d.priority ORDER BY day
+        GROUP BY day, p.code, p.sort_order
+        ORDER BY day, p.sort_order
         """
     )
     rows = (await session.execute(sql, {"ws": str(ws_id), "cutoff": cutoff})).all()
-    prio_order = ["P0", "P1", "P2", "P3", "—"]
-    labels = {"P0": "P0 (критично)", "P1": "P1 (важно)", "P2": "P2 (обычно)", "P3": "P3 (мелочь)", "—": "Без приоритета"}
+    # Build the ordered list of priority codes + their human-readable
+    # labels straight from the reference table so the chart matches
+    # what admins see in the editor (no hardcoded P0/P1 strings here).
+    ref_rows = (
+        await session.execute(
+            text(
+                "SELECT code, name FROM ref_defect_priorities "
+                "WHERE is_active ORDER BY sort_order"
+            )
+        )
+    ).all()
+    prio_order = [code for code, _name in ref_rows]
+    labels = {code: name for code, name in ref_rows}
     return _densify_multi(rows, days, prio_order, labels)
 
 
@@ -815,10 +838,14 @@ async def _defects_top_screens(session, ws_id, params):
 
 async def _defects_recent(session, ws_id, params):
     limit = max(1, min(int(params.get("limit", 10)), 200))
+    # PER-120: select the priority name from the reference table
+    # instead of the deleted varchar column.
     sql = text(
         """
-        SELECT d.created_at, d.priority, d.kind, d.title, d.screen_name
-        FROM defects d JOIN runs r ON r.id = d.run_id
+        SELECT d.created_at, p.name, d.kind, d.title, d.screen_name
+        FROM defects d
+        JOIN runs r ON r.id = d.run_id
+        JOIN ref_defect_priorities p ON p.id = d.priority_id
         WHERE r.workspace_id = :ws
         ORDER BY d.created_at DESC LIMIT :lim
         """

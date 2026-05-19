@@ -24,7 +24,12 @@ from app.models.dashboard import (
     WidgetPackage,
     WidgetTemplate,
 )
-from app.models.defect import DefectKind, DefectModel, DefectPriority
+from app.models.defect import (
+    DefectKind,
+    DefectModel,
+    DefectPriorityRef,
+    DefectSeverityRef,
+)
 from app.models.device_config import DeviceConfig
 from app.models.help import (
     FeedbackKind,
@@ -74,7 +79,8 @@ __all__ = [
     "CustomDictionaryPermission",
     "DefectKind",
     "DefectModel",
-    "DefectPriority",
+    "DefectPriorityRef",
+    "DefectSeverityRef",
     "DeviceConfig",
     "EMBEDDING_DIM",
     "Edge",

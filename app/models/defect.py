@@ -1,37 +1,49 @@
 """Defect model: issues the agent detected during a run.
 
 Each defect is tied to a specific run + screen + (optionally) action that
-triggered it. The LLM decides whether a failure it observed is a real defect
-and assigns a priority, using context like:
-  - the element that failed + its expected behavior (from scenario)
-  - the RAG-retrieved spec for this screen
-  - screenshot before/after the action
-  - infra signals (network error, screen didn't load, etc. → filter out)
+triggered it. The LLM decides whether a failure it observed is a real defect,
+then assigns one row from each of two reference tables:
+
+* ``ref_defect_priorities`` — how urgent the fix is (Urgent / High / Medium / Low).
+* ``ref_defect_severities`` — how severe the bug itself is (Blocker / Critical / …).
+
+Both reference tables are admin-editable (see PER-120). The legacy
+``DefectPriority`` StrEnum (P0/P1/P2/P3) is gone — callers that used to
+import it should now look up the priority row by ``code`` instead.
 
 When integrated with TestOps, high-priority defects are pushed there so QA
-can triage the top P0/P1 in one place instead of wading through noise.
+can triage the top ones in one place instead of wading through noise.
 """
 
 from datetime import datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
-class DefectPriority(StrEnum):
-    """Jira-style severity used for ranking defects."""
-
-    P0 = "P0"   # blocker — app crashed / main flow broken
-    P1 = "P1"   # critical — feature doesn't work
-    P2 = "P2"   # major — works but wrong
-    P3 = "P3"   # minor — cosmetic / edge case
+from app.db import Base
 
 
 class DefectKind(StrEnum):
-    """Category of defect. Used for filtering and TestOps routing."""
+    """Category of defect. Used for filtering and TestOps routing.
+
+    Kind is a fixed taxonomy — unlike priority/severity, it doesn't need
+    a reference table because we use it as a routing discriminator, not
+    as a user-tunable scale. Add new values here when a new defect
+    routing path is required.
+    """
 
     FUNCTIONAL = "functional"      # feature doesn't work as specified
     UI = "ui"                      # visual / layout problem
@@ -43,12 +55,48 @@ class DefectKind(StrEnum):
     INFRA_NOISE = "infra_noise"    # network / test data / env problem — NOT a bug
 
 
-class Defect:
-    """Placeholder for type hints — actual definition below as SQLA model."""
-    pass
+class DefectPriorityRef(Base):
+    """Reference: how urgent the fix is. Admin-editable via PER-120 UI."""
+
+    __tablename__ = "ref_defect_priorities"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8c8c8c")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
-from app.db import Base  # noqa: E402
+class DefectSeverityRef(Base):
+    """Reference: how severe the defect itself is. Admin-editable."""
+
+    __tablename__ = "ref_defect_severities"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8c8c8c")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class DefectModel(Base):
@@ -72,10 +120,25 @@ class DefectModel(Base):
     screen_id_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     screen_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    # LLM-assigned ranking. Priority is what QA filters on in the UI.
-    priority: Mapped[str] = mapped_column(
-        String(10), default=DefectPriority.P2.value, nullable=False, index=True
+    # PER-120: priority and severity are now FK references. Sort order
+    # for triage UI comes from the referenced row's `sort_order`.
+    priority_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("ref_defect_priorities.id", ondelete="RESTRICT"),
+        nullable=False,
     )
+    severity_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("ref_defect_severities.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    priority: Mapped[DefectPriorityRef] = relationship(
+        "DefectPriorityRef", foreign_keys=[priority_id], lazy="joined"
+    )
+    severity: Mapped[DefectSeverityRef] = relationship(
+        "DefectSeverityRef", foreign_keys=[severity_id], lazy="joined"
+    )
+
     kind: Mapped[str] = mapped_column(
         String(20), default=DefectKind.FUNCTIONAL.value, nullable=False, index=True
     )
@@ -92,7 +155,7 @@ class DefectModel(Base):
     # The raw LLM analysis — helps us understand WHY the model flagged this.
     # Useful for debugging false positives and tuning the defect-detection
     # prompt. Kept as JSON so we can add fields without migrations.
-    llm_analysis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    llm_analysis_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # When TestOps integration is on, this is the external ticket ID once
     # the defect has been pushed there. Empty = not pushed yet.
