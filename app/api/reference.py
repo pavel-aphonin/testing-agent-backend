@@ -16,6 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
+from app.models.defect import (
+    DefectPriorityRef,
+    DefectSeverityRef,
+)
 from app.models.reference import (
     RefActionType,
     RefAppCategory,
@@ -118,6 +122,50 @@ class AppCategoryCreate(_CreateBase):
     sort_order: int = 0
 
 
+# PER-120: shared shape for ref_defect_priorities / ref_defect_severities.
+# Both reference tables expose the same columns (name + alias-style code
+# + colour + free-form description + sort_order) so the admin UI can
+# render them with one component. The only difference between Priority
+# and Severity is the table they back; everything below is identical.
+
+
+class _DefectRefRead(_RefBase):
+    color: str = "#8c8c8c"
+    description: str = ""
+    sort_order: int = 0
+
+
+class _DefectRefCreate(_CreateBase):
+    color: str = "#8c8c8c"
+    description: str = ""
+    sort_order: int = 0
+
+
+class DefectPriorityReadAdmin(_DefectRefRead):
+    pass
+
+
+class DefectSeverityReadAdmin(_DefectRefRead):
+    pass
+
+
+class DefectPriorityCreate(_DefectRefCreate):
+    pass
+
+
+class DefectSeverityCreate(_DefectRefCreate):
+    pass
+
+
+class ReorderPayload(BaseModel):
+    """Body for the drag-and-drop reorder endpoint: just the ordered
+    list of row ids. The backend overwrites ``sort_order`` with the
+    index in this list so the client can be entirely declarative —
+    it tells us what the new order looks like, not how to mutate
+    individual rows."""
+    ids: list[UUID]
+
+
 # ── List endpoints (open to any user) ────────────────────────────────────────
 
 @router.get("/platforms", response_model=list[PlatformRead])
@@ -195,6 +243,41 @@ async def list_app_categories(
     q = q.order_by(RefAppCategory.sort_order, RefAppCategory.name)
     r = await session.execute(q)
     return list(r.scalars().all())
+
+
+@router.get(
+    "/defect-priorities",
+    response_model=list[DefectPriorityReadAdmin],
+)
+async def list_defect_priorities(
+    _u: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    active_only: bool = False,
+) -> list[DefectPriorityRef]:
+    """List defect-priority reference rows in admin order (lowest
+    ``sort_order`` first, i.e. most urgent on top)."""
+    q = select(DefectPriorityRef)
+    if active_only:
+        q = q.where(DefectPriorityRef.is_active.is_(True))
+    q = q.order_by(DefectPriorityRef.sort_order, DefectPriorityRef.name)
+    return list((await session.execute(q)).scalars().all())
+
+
+@router.get(
+    "/defect-severities",
+    response_model=list[DefectSeverityReadAdmin],
+)
+async def list_defect_severities(
+    _u: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+    active_only: bool = False,
+) -> list[DefectSeverityRef]:
+    """List defect-severity reference rows in admin order."""
+    q = select(DefectSeverityRef)
+    if active_only:
+        q = q.where(DefectSeverityRef.is_active.is_(True))
+    q = q.order_by(DefectSeverityRef.sort_order, DefectSeverityRef.name)
+    return list((await session.execute(q)).scalars().all())
 
 
 # ── Generic mutation handler factory ─────────────────────────────────────────
@@ -296,6 +379,46 @@ _make_admin_routes(RefDeviceType, "device-types", DeviceTypeCreate, DeviceTypeRe
 _make_admin_routes(RefActionType, "action-types", ActionTypeCreate, ActionTypeRead)
 _make_admin_routes(RefTestDataType, "test-data-types", TestDataTypeCreate, TestDataTypeRead)
 _make_admin_routes(RefAppCategory, "app-categories", AppCategoryCreate, AppCategoryRead)
+_make_admin_routes(
+    DefectPriorityRef, "defect-priorities",
+    DefectPriorityCreate, DefectPriorityReadAdmin,
+)
+_make_admin_routes(
+    DefectSeverityRef, "defect-severities",
+    DefectSeverityCreate, DefectSeverityReadAdmin,
+)
+
+
+def _make_reorder_route(model, prefix: str) -> None:
+    """Drag-and-drop reorder: the client posts the ordered list of
+    ids; backend rewrites ``sort_order`` to the index of each id in
+    the list. Atomic — either every row gets its new index or the
+    transaction rolls back."""
+
+    @router.put(f"/{prefix}/reorder", status_code=204)
+    async def _reorder(
+        payload: ReorderPayload,
+        _u: Annotated[User, Depends(require_permission("dictionaries.edit"))],
+        session: Annotated[AsyncSession, Depends(get_async_session)],
+    ) -> None:
+        # Fetch all rows in one round-trip and key by id so we don't
+        # do N selects.
+        rows = (
+            await session.execute(select(model).where(model.id.in_(payload.ids)))
+        ).scalars().all()
+        by_id = {r.id: r for r in rows}
+        missing = [pid for pid in payload.ids if pid not in by_id]
+        if missing:
+            raise HTTPException(
+                404, f"Unknown ids in reorder payload: {missing}",
+            )
+        for i, pid in enumerate(payload.ids):
+            by_id[pid].sort_order = i
+        await session.commit()
+
+
+_make_reorder_route(DefectPriorityRef, "defect-priorities")
+_make_reorder_route(DefectSeverityRef, "defect-severities")
 
 
 # ── Workspace action settings ────────────────────────────────────────────────
