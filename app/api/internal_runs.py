@@ -280,12 +280,21 @@ async def claim_next_pending_run(
     # PER-106 #5: resolve the run's LLM model name so the worker knows
     # which llama-swap routing key to use. None means "no per-run
     # override" — the worker reads TA_LLM_MODEL_NAME from its env.
+    # PER-131-lite: pull the thinking-mode passport off the same row
+    # so the worker can decide whether to split the goal-decide call
+    # into a free reasoning pass + a constrained JSON pass.
     llm_model_name: str | None = None
+    supports_thinking: bool = False
+    thinking_activation: str | None = None
+    thinking_extract_regex: str | None = None
     if run.llm_model_id is not None:
         from app.models.llm_model import LLMModel as _LLMModel
         model = await session.get(_LLMModel, run.llm_model_id)
         if model is not None and model.is_active:
             llm_model_name = model.name
+            supports_thinking = bool(model.supports_thinking)
+            thinking_activation = model.thinking_activation
+            thinking_extract_regex = model.thinking_extract_regex
 
     return RunClaimResponse(
         run_id=run.id,
@@ -319,6 +328,11 @@ async def claim_next_pending_run(
         replay_actions=run.replay_actions_json or [],
         # PER-111 v2: action dictionary for goal-node response_format.
         actions=actions,
+        # PER-131-lite: thinking-mode passport. Defaults are
+        # backwards-compatible (no model row → no thinking).
+        supports_thinking=supports_thinking,
+        thinking_activation=thinking_activation,
+        thinking_extract_regex=thinking_extract_regex,
         # PER-127: screen-stability tuning. Read straight off the
         # workspace row; falls back to the worker's own defaults when
         # the run has no workspace (legacy V1 runs).

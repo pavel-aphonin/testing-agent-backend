@@ -149,6 +149,14 @@ class RunClaimResponse(BaseModel):
     settle_timeout_ms: int = 5000
     settle_poll_ms: int = 500
     loading_indicator_keywords: list[str] = []
+    # PER-131-lite: thinking-mode passport of the run's LLM model.
+    # Worker uses these to decide whether goal-decide should split
+    # into a free-form reasoning pass + a constrained JSON pass.
+    # Defaults (false / blank) keep the legacy single-pass behavior
+    # for non-thinking models like Nemotron.
+    supports_thinking: bool = False
+    thinking_activation: str | None = None
+    thinking_extract_regex: str | None = None
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

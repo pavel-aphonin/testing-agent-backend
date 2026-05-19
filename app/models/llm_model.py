@@ -43,6 +43,20 @@ class LLMModel(Base):
     supports_vision: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     supports_tool_use: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # PER-131-lite: thinking-mode passport. ``supports_thinking`` is
+    # the master switch — when true, the worker injects
+    # ``thinking_activation`` at the start of the system prompt to
+    # turn the model's reasoning mode on, and uses
+    # ``thinking_extract_regex`` to peel the final answer out of
+    # the response. Both columns are model-specific protocol bits;
+    # see migration 20260520_per131_thinking for the Gemma 4
+    # defaults and how to seed other families.
+    supports_thinking: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+    thinking_activation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    thinking_extract_regex: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Inference defaults
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     default_top_p: Mapped[float] = mapped_column(Float, default=0.9, nullable=False)
