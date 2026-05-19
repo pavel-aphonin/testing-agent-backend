@@ -141,6 +141,14 @@ class RunClaimResponse(BaseModel):
     # LLM picks ``action`` from a real, editable dictionary instead
     # of a hardcoded enum in code.
     actions: list[dict] = []
+    # PER-127: per-workspace screen-stability tuning. Worker uses
+    # these to drive _wait_for_screen_stable between dispatching an
+    # action and asking the LLM for the next decision. None = use
+    # the worker's built-in defaults (5000 ms / 500 ms / built-in
+    # keyword list).
+    settle_timeout_ms: int = 5000
+    settle_poll_ms: int = 500
+    loading_indicator_keywords: list[str] = []
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

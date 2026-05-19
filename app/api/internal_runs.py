@@ -319,7 +319,35 @@ async def claim_next_pending_run(
         replay_actions=run.replay_actions_json or [],
         # PER-111 v2: action dictionary for goal-node response_format.
         actions=actions,
+        # PER-127: screen-stability tuning. Read straight off the
+        # workspace row; falls back to the worker's own defaults when
+        # the run has no workspace (legacy V1 runs).
+        **(_settle_fields(workspace) if (workspace := await _get_workspace(session, run.workspace_id)) else {}),
     )
+
+
+async def _get_workspace(session, ws_id):  # type: ignore[no-untyped-def]
+    """Load the run's workspace so claim_next can ship its settle
+    settings without doing the work inline. Returns None when the
+    run pre-dates workspaces (very old V1 rows)."""
+    if ws_id is None:
+        return None
+    from app.models.workspace import Workspace
+    return (
+        await session.execute(select(Workspace).where(Workspace.id == ws_id))
+    ).scalar_one_or_none()
+
+
+def _settle_fields(workspace) -> dict[str, object]:  # type: ignore[no-untyped-def]
+    """Project workspace settle settings onto the RunClaimResponse
+    kwargs. Kept as a small helper so the claim_next return statement
+    stays readable; also lets the worker default-merge if the
+    workspace row predates the migration (None columns)."""
+    return {
+        "settle_timeout_ms": workspace.settle_timeout_ms or 5000,
+        "settle_poll_ms": workspace.settle_poll_ms or 500,
+        "loading_indicator_keywords": list(workspace.loading_indicator_keywords or []),
+    }
 
 
 @router.post(

@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
+import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,6 +73,23 @@ class Workspace(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), onupdate=func.now(), nullable=True
+    )
+
+    # PER-127: screen-stability settings used by the worker's
+    # _wait_for_screen_stable. Tunable per workspace so a "slow
+    # network" sandbox can wait longer than a snappy demo build.
+    settle_timeout_ms: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=5000, server_default="5000",
+    )
+    settle_poll_ms: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=500, server_default="500",
+    )
+    # JSONB list of substrings; if any match an AXe element's label
+    # or value (case-insensitive), the screen is treated as "still
+    # loading" even when the accessibility-tree fingerprint has
+    # converged. Defaults seeded in migration 20260520_per127.
+    loading_indicator_keywords: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=sa.text("'[]'::jsonb"),
     )
 
     # Relationships
