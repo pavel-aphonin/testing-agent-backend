@@ -7,6 +7,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # PER-136: explicit dev/prod switch. In ``dev`` the validators
+    # below soften their checks (admin@example.com / weak passwords
+    # are allowed with a warning) so first-time local setup just
+    # works. In ``prod`` they enforce real-credential policy.
+    # Default ``dev`` keeps the developer experience friendly; CI/
+    # production deployments set DEPLOYMENT_MODE=prod in their env.
+    deployment_mode: str = "dev"
+
     # Database
     database_url: str = "postgresql+asyncpg://testing_agent:testing_agent@postgres:5432/testing_agent"
 
@@ -93,18 +101,31 @@ class Settings(BaseSettings):
 
     @field_validator("initial_admin_email")
     @classmethod
-    def _admin_email_required(cls, v: str) -> str:
+    def _admin_email_required(cls, v: str, info) -> str:
+        # PER-136: empty / blank email is always rejected — the seed
+        # has nothing to create without it. The ``admin@example.com``
+        # placeholder is rejected only in ``prod`` mode; in ``dev``
+        # we let it through with a logger warning so first-time setup
+        # is friction-free. Operators flipping to prod will see the
+        # error on their next deploy if they didn't change it.
+        import logging
         if not v or v.strip() == "":
             raise ValueError(
                 "INITIAL_ADMIN_EMAIL env var is required. The first-run "
-                "seed creates a single admin account with this email; "
-                "shipping a default like 'admin@example.com' would make "
-                "every fresh deployment guessable."
+                "seed creates a single admin account with this email."
             )
+        mode = (info.data.get("deployment_mode") or "dev").lower()
         if v == "admin@example.com":
-            raise ValueError(
-                "INITIAL_ADMIN_EMAIL is the placeholder 'admin@example.com'. "
-                "Use a real address you control."
+            if mode == "prod":
+                raise ValueError(
+                    "INITIAL_ADMIN_EMAIL is the placeholder "
+                    "'admin@example.com'. Use a real address you control "
+                    "(DEPLOYMENT_MODE=prod forbids placeholders)."
+                )
+            logging.getLogger(__name__).warning(
+                "INITIAL_ADMIN_EMAIL is set to 'admin@example.com' — "
+                "fine for dev, but flip DEPLOYMENT_MODE=prod and use a "
+                "real address before any non-local deployment."
             )
         return v
 

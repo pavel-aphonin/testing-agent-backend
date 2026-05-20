@@ -28,3 +28,12 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str = Field(..., min_length=1, max_length=200)
     new_password: str = Field(..., min_length=8, max_length=200)
+
+
+class ChangeEmailRequest(BaseModel):
+    """PER-136 self-service email change. Same current-password guard
+    as ChangePasswordRequest: a stolen token should not be enough to
+    silently move the account onto an attacker-controlled address."""
+
+    current_password: str = Field(..., min_length=1, max_length=200)
+    new_email: EmailStr

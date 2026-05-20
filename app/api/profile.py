@@ -19,7 +19,7 @@ from app.auth.users import UserManager, current_active_user
 from app.config import settings
 from app.db import get_async_session
 from app.models.user import User
-from app.schemas.profile import ChangePasswordRequest, ProfileRead
+from app.schemas.profile import ChangeEmailRequest, ChangePasswordRequest, ProfileRead
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -76,6 +76,61 @@ async def change_my_password(
     user.must_change_password = False
     session.add(user)
     await session.commit()
+
+
+# ── Email change (PER-136) ──────────────────────────────────────────────────
+
+
+@router.post("/change-email", response_model=ProfileRead)
+async def change_my_email(
+    payload: ChangeEmailRequest,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_async_session)],
+) -> User:
+    """Self-service email change. Requires current password as the
+    same drive-by-attack guard ``change-password`` uses — a stolen
+    JWT alone shouldn't be enough to move the account onto an
+    attacker-controlled address.
+
+    Conflicts (the new email is already taken by someone else) are
+    reported with 409 so the UI can show "already in use" instead of
+    a generic 500.
+    """
+    from sqlalchemy import select
+    user_db = SQLAlchemyUserDatabase(session, User)
+    user_manager = UserManager(user_db)
+
+    is_valid, _ = user_manager.password_helper.verify_and_update(
+        payload.current_password, user.hashed_password
+    )
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    new_email = payload.new_email.strip().lower()
+    if new_email == user.email.lower():
+        # No-op — return current profile so the UI gets a fresh copy
+        # without us bumping ``updated_at`` for nothing.
+        return user
+
+    clash = (
+        await session.execute(
+            select(User.id).where(User.email == new_email).where(User.id != user.id)
+        )
+    ).scalar_one_or_none()
+    if clash is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email is already taken by another account",
+        )
+
+    user.email = new_email
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
 
 
 # ── Avatar ───────────────────────────────────────────────────────────────────
