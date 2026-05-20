@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -56,6 +57,24 @@ class LLMModel(Base):
     )
     thinking_activation: Mapped[str | None] = mapped_column(Text, nullable=True)
     thinking_extract_regex: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # PER-138: full capabilities adapter. Lets the worker target any
+    # LLM backend (llama.cpp, OpenAI-compat, AlphaGen) without code
+    # changes — just add a row with the right passport. See
+    # migration 20260520_per138 for the column intent.
+    provider: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="llama_cpp", server_default="llama_cpp",
+    )
+    endpoint_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supports_json_schema: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.text("true"),
+    )
+    supports_multimodal_image: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.text("false"),
+    )
+    max_context_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=32768, server_default="32768",
+    )
 
     # Inference defaults
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)

@@ -287,6 +287,11 @@ async def claim_next_pending_run(
     supports_thinking: bool = False
     thinking_activation: str | None = None
     thinking_extract_regex: str | None = None
+    provider: str = "llama_cpp"
+    endpoint_url: str | None = None
+    supports_json_schema: bool = True
+    supports_multimodal_image: bool = False
+    max_context_tokens: int = 32768
     if run.llm_model_id is not None:
         from app.models.llm_model import LLMModel as _LLMModel
         model = await session.get(_LLMModel, run.llm_model_id)
@@ -295,6 +300,12 @@ async def claim_next_pending_run(
             supports_thinking = bool(model.supports_thinking)
             thinking_activation = model.thinking_activation
             thinking_extract_regex = model.thinking_extract_regex
+            # PER-138 capability projection.
+            provider = model.provider or "llama_cpp"
+            endpoint_url = model.endpoint_url
+            supports_json_schema = bool(model.supports_json_schema)
+            supports_multimodal_image = bool(model.supports_multimodal_image)
+            max_context_tokens = int(model.max_context_tokens or 32768)
 
     return RunClaimResponse(
         run_id=run.id,
@@ -333,6 +344,15 @@ async def claim_next_pending_run(
         supports_thinking=supports_thinking,
         thinking_activation=thinking_activation,
         thinking_extract_regex=thinking_extract_regex,
+        # PER-138: full capabilities — provider routing + transport
+        # toggles. Worker respects supports_json_schema (drops
+        # response_format if false) and supports_multimodal_image
+        # (skips screenshot if false).
+        provider=provider,
+        endpoint_url=endpoint_url,
+        supports_json_schema=supports_json_schema,
+        supports_multimodal_image=supports_multimodal_image,
+        max_context_tokens=max_context_tokens,
         # PER-127: screen-stability tuning. Read straight off the
         # workspace row; falls back to the worker's own defaults when
         # the run has no workspace (legacy V1 runs).

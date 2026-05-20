@@ -157,6 +157,16 @@ class RunClaimResponse(BaseModel):
     supports_thinking: bool = False
     thinking_activation: str | None = None
     thinking_extract_regex: str | None = None
+    # PER-138: full capabilities. Worker uses these to decide whether
+    # to send response_format=json_schema, attach the screenshot,
+    # and which backend codepath to use. Defaults keep the existing
+    # llama_cpp + json_schema + text-only behaviour intact for runs
+    # that have no LLM model row (legacy V1).
+    provider: str = "llama_cpp"
+    endpoint_url: str | None = None
+    supports_json_schema: bool = True
+    supports_multimodal_image: bool = False
+    max_context_tokens: int = 32768
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False
