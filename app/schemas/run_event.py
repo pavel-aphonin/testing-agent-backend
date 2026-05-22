@@ -167,6 +167,11 @@ class RunClaimResponse(BaseModel):
     supports_json_schema: bool = True
     supports_multimodal_image: bool = False
     max_context_tokens: int = 32768
+    # PER-145 L1: per-model coordinate space for tap_at. Worker scales
+    # incoming (x, y) from the model into AXe screen points before
+    # dispatching. "points" (default) = passthrough; "normalized_1000"
+    # = Qwen2.5/3-VL convention; "pixels" = Nemotron-style raw pixels.
+    tap_at_coord_space: str = "points"
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

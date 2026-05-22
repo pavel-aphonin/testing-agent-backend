@@ -76,6 +76,15 @@ class LLMModel(Base):
         Integer, nullable=False, default=32768, server_default="32768",
     )
 
+    # PER-145 L1: coordinate space the model uses for ``tap_at``.
+    # Gemma family emits raw screen points; Qwen2.5/3-VL emits
+    # normalized 0–1000; Nemotron emits raw pixels. Worker scales
+    # accordingly before calling AXe. See migration
+    # 20260522_tap_at_coord_space for the contract.
+    tap_at_coord_space: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="points", server_default="points",
+    )
+
     # Inference defaults
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     default_top_p: Mapped[float] = mapped_column(Float, default=0.9, nullable=False)

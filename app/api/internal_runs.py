@@ -292,6 +292,7 @@ async def claim_next_pending_run(
     supports_json_schema: bool = True
     supports_multimodal_image: bool = False
     max_context_tokens: int = 32768
+    tap_at_coord_space: str = "points"
     if run.llm_model_id is not None:
         from app.models.llm_model import LLMModel as _LLMModel
         model = await session.get(_LLMModel, run.llm_model_id)
@@ -306,6 +307,8 @@ async def claim_next_pending_run(
             supports_json_schema = bool(model.supports_json_schema)
             supports_multimodal_image = bool(model.supports_multimodal_image)
             max_context_tokens = int(model.max_context_tokens or 32768)
+            # PER-145 L1: which coord space the model uses for tap_at.
+            tap_at_coord_space = model.tap_at_coord_space or "points"
 
     return RunClaimResponse(
         run_id=run.id,
@@ -353,6 +356,8 @@ async def claim_next_pending_run(
         supports_json_schema=supports_json_schema,
         supports_multimodal_image=supports_multimodal_image,
         max_context_tokens=max_context_tokens,
+        # PER-145 L1: per-model coordinate space for tap_at.
+        tap_at_coord_space=tap_at_coord_space,
         # PER-127: screen-stability tuning. Read straight off the
         # workspace row; falls back to the worker's own defaults when
         # the run has no workspace (legacy V1 runs).
