@@ -96,6 +96,19 @@ class Run(Base):
     os_version: Mapped[str | None] = mapped_column(String(200), nullable=True)
     app_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # PER-162: clone-from-baseline simulator. When set, the worker
+    # uses ``simctl clone`` from this UDID instead of ``simctl create
+    # + install``. The baseline is a pre-configured iOS simulator
+    # (manually: logged into the app, dismissed onboarding, granted
+    # permissions) — clone starts in the authorised zone, so
+    # post-login scenarios don't have to replay login on every run
+    # and don't trigger anti-fraud bans on repeated failed attempts.
+    # Mutually exclusive with ``device_type``/``os_version`` —
+    # operator picks one path per run.
+    baseline_udid: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
+
     # PER-40 / PER-41: a re-run of a previously-recorded path. When set,
     # ``replay_actions_json`` carries the action sequence the worker
     # should execute before falling into free exploration; ``replay_of``

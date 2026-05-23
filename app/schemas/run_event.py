@@ -119,6 +119,13 @@ class RunClaimResponse(BaseModel):
     device_type: str | None = None
     os_version: str | None = None
     app_file_path: str | None = None
+    # PER-162: when set, the worker takes the clone-from-baseline
+    # path: `simctl clone <baseline_udid> TA-<run_id>` instead of
+    # `simctl create + install`. The baseline is a pre-configured
+    # simulator (logged in, onboarded, permissions granted) — clone
+    # starts in the authorised zone. Mutually exclusive with
+    # ``device_type``/``os_version`` (operator picks one path).
+    baseline_udid: str | None = None
     # Test data the agent can use when filling form fields.
     # Keyed by semantic name (e.g. "email", "password", "phone") — the agent
     # picks the right entry based on what the field is asking for. Categorized

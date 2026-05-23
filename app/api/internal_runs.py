@@ -324,6 +324,10 @@ async def claim_next_pending_run(
         device_type=run.device_type,
         os_version=run.os_version,
         app_file_path=run.app_file_path,
+        # PER-162: when set, worker clones from this baseline UDID
+        # instead of creating fresh. Mutually exclusive with the
+        # device_type/os_version path above (worker checks).
+        baseline_udid=run.baseline_udid,
         # Test data for the agent to use when filling forms
         test_data=test_data,
         # Pre-scripted scenarios to execute before free exploration
