@@ -85,6 +85,19 @@ class LLMModel(Base):
         String(20), nullable=False, default="points", server_default="points",
     )
 
+    # PER-163: minimum image tokens for VLM grounding tasks. When set,
+    # the host-services launcher passes ``--image-min-tokens <N>`` to
+    # llama-server so the vision encoder uses enough patches to
+    # distinguish small UI elements (PIN keypad digits, app-icon
+    # grids, calendar cells). Qwen3-VL requires 1024 for reliable
+    # grounding per its own startup warning; without it screenshots
+    # encode to ~420 tokens and tap_at on a keypad digit lands on a
+    # blurry blob. NULL → don't pass the flag (text-only models or
+    # models that pick the right budget on their own).
+    image_min_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+
     # Inference defaults
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     default_top_p: Mapped[float] = mapped_column(Float, default=0.9, nullable=False)

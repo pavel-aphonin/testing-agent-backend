@@ -214,6 +214,9 @@ app.include_router(llm_models_api.public_router)
 app.include_router(agent_settings_api.router)
 app.include_router(profile_api.router)
 app.include_router(internal_runs_api.router)
+# PER-163: host-services launcher config endpoint
+from app.api import internal_chat_model as internal_chat_model_api  # noqa: E402
+app.include_router(internal_chat_model_api.router)
 app.include_router(hf_models_api.router)
 app.include_router(knowledge_api.router)
 app.include_router(run_mirror_api.router)
