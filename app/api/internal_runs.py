@@ -293,6 +293,7 @@ async def claim_next_pending_run(
     supports_multimodal_image: bool = False
     max_context_tokens: int = 32768
     tap_at_coord_space: str = "points"
+    screenshot_max_dim: int | None = None
     if run.llm_model_id is not None:
         from app.models.llm_model import LLMModel as _LLMModel
         model = await session.get(_LLMModel, run.llm_model_id)
@@ -309,6 +310,8 @@ async def claim_next_pending_run(
             max_context_tokens = int(model.max_context_tokens or 32768)
             # PER-145 L1: which coord space the model uses for tap_at.
             tap_at_coord_space = model.tap_at_coord_space or "points"
+            # PER-163 retry: per-model screenshot resize ceiling.
+            screenshot_max_dim = model.screenshot_max_dim
 
     return RunClaimResponse(
         run_id=run.id,
@@ -328,6 +331,8 @@ async def claim_next_pending_run(
         # instead of creating fresh. Mutually exclusive with the
         # device_type/os_version path above (worker checks).
         baseline_udid=run.baseline_udid,
+        # PER-163 retry: per-model screenshot resize ceiling.
+        screenshot_max_dim=screenshot_max_dim,
         # Test data for the agent to use when filling forms
         test_data=test_data,
         # Pre-scripted scenarios to execute before free exploration

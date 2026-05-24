@@ -179,6 +179,10 @@ class RunClaimResponse(BaseModel):
     # dispatching. "points" (default) = passthrough; "normalized_1000"
     # = Qwen2.5/3-VL convention; "pixels" = Nemotron-style raw pixels.
     tap_at_coord_space: str = "points"
+    # PER-163 retry: max dim (px) of the screenshot sent to the LLM.
+    # NULL = worker falls back to its old logical-points resize. Vision
+    # grounding models want this near native pixel resolution.
+    screenshot_max_dim: int | None = None
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

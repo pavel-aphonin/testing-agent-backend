@@ -98,6 +98,20 @@ class LLMModel(Base):
         Integer, nullable=True,
     )
 
+    # PER-163 retry: maximum dimension (px) of the screenshot sent
+    # to this model. Worker scales the simulator screenshot down so
+    # that ``max(width, height) <= screenshot_max_dim``, preserving
+    # aspect ratio. NULL → legacy behaviour (resize to logical
+    # points, e.g. 440x956), which loses detail vital for grounding
+    # on small UI controls. Vision-precision models should be set
+    # close to the simulator's native pixel resolution (iPhone 17
+    # Pro Max native ~1320x2868 — a budget of 1920 keeps full
+    # height and lets the encoder see PIN-keypad digits as multi-
+    # token shapes rather than single-token blobs.
+    screenshot_max_dim: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+
     # Inference defaults
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     default_top_p: Mapped[float] = mapped_column(Float, default=0.9, nullable=False)
