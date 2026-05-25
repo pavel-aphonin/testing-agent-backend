@@ -50,6 +50,15 @@ class ChatModelConfig(BaseModel):
     # PER-138 passport bits the launcher may eventually want too.
     supports_thinking: bool = False
     supports_json_schema: bool = True
+    # PER-164 followup: per-model sampling profile. Worker reads
+    # these and forwards into the chat-completions payload, so each
+    # model gets the family-appropriate temperature/top_p/etc instead
+    # of the worker's old hardcoded T=0.2. NULL on top_k/min_p means
+    # "let llama-server pick its default" (40 / off).
+    default_temperature: float = 0.7
+    default_top_p: float = 0.9
+    default_top_k: int | None = None
+    default_min_p: float | None = None
 
 
 @router.get(
@@ -94,4 +103,8 @@ async def active_chat_model_config(
         image_min_tokens=row.image_min_tokens,
         supports_thinking=bool(row.supports_thinking),
         supports_json_schema=bool(row.supports_json_schema),
+        default_temperature=float(row.default_temperature),
+        default_top_p=float(row.default_top_p),
+        default_top_k=row.default_top_k,
+        default_min_p=row.default_min_p,
     )

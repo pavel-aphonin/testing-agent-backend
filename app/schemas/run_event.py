@@ -183,6 +183,16 @@ class RunClaimResponse(BaseModel):
     # NULL = worker falls back to its old logical-points resize. Vision
     # grounding models want this near native pixel resolution.
     screenshot_max_dim: int | None = None
+    # PER-164 followup: per-model sampling profile. Worker stops
+    # hardcoding T=0.2 and forwards these into every
+    # /v1/chat/completions payload. Defaults match LLMModel column
+    # defaults so legacy runs without an attached model row keep
+    # the old behaviour. NULL on top_k/min_p = let llama-server
+    # pick its default.
+    default_temperature: float = 0.7
+    default_top_p: float = 0.9
+    default_top_k: int | None = None
+    default_min_p: float | None = None
     # Property-based testing — when true, the agent's prompt includes
     # validation-probing variants for each field type.
     pbt_enabled: bool = False

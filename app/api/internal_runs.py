@@ -294,6 +294,17 @@ async def claim_next_pending_run(
     max_context_tokens: int = 32768
     tap_at_coord_space: str = "points"
     screenshot_max_dim: int | None = None
+    # PER-164 followup: per-model sampling profile. The worker was
+    # hardcoding T=0.2 for every model; these forward the family-
+    # appropriate values (Gemma 4 wants 0.65/0.95/64/0.05, Qwen-VL
+    # wants 0.7/0.8/20/0). NULL on top_k/min_p = let llama-server
+    # pick the default. Defaults below match the LLMModel column
+    # defaults so legacy runs (no model row attached) keep the old
+    # behaviour.
+    default_temperature: float = 0.7
+    default_top_p: float = 0.9
+    default_top_k: int | None = None
+    default_min_p: float | None = None
     if run.llm_model_id is not None:
         from app.models.llm_model import LLMModel as _LLMModel
         model = await session.get(_LLMModel, run.llm_model_id)
@@ -312,6 +323,11 @@ async def claim_next_pending_run(
             tap_at_coord_space = model.tap_at_coord_space or "points"
             # PER-163 retry: per-model screenshot resize ceiling.
             screenshot_max_dim = model.screenshot_max_dim
+            # PER-164 followup: sampling passport.
+            default_temperature = float(model.default_temperature)
+            default_top_p = float(model.default_top_p)
+            default_top_k = model.default_top_k
+            default_min_p = model.default_min_p
 
     return RunClaimResponse(
         run_id=run.id,
@@ -367,6 +383,13 @@ async def claim_next_pending_run(
         max_context_tokens=max_context_tokens,
         # PER-145 L1: per-model coordinate space for tap_at.
         tap_at_coord_space=tap_at_coord_space,
+        # PER-164 followup: per-model sampling profile. Worker forwards
+        # these into every /v1/chat/completions call so Gemma 4 gets
+        # T=0.65 and Qwen gets T=0.7 instead of the old hardcoded 0.2.
+        default_temperature=default_temperature,
+        default_top_p=default_top_p,
+        default_top_k=default_top_k,
+        default_min_p=default_min_p,
         # PER-127: screen-stability tuning. Read straight off the
         # workspace row; falls back to the worker's own defaults when
         # the run has no workspace (legacy V1 runs).

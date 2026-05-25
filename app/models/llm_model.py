@@ -112,9 +112,23 @@ class LLMModel(Base):
         Integer, nullable=True,
     )
 
-    # Inference defaults
+    # Inference defaults. ``default_temperature`` / ``default_top_p``
+    # have always been here but were silently ignored by the worker
+    # (it hardcoded T=0.2). PER-164 followup wired them through and
+    # added ``default_top_k`` / ``default_min_p`` to complete the
+    # sampling passport. Each family has a documented sweet spot:
+    # Gemma 4 wants (T=0.65, top_p=0.95, top_k=64, min_p=0.05) per
+    # Google; Qwen-VL/3.x wants (T=0.7, top_p=0.8, top_k=20, min_p=0)
+    # per Alibaba. Wrong T in particular hurts the most — at low T
+    # Gemma 4 falls into the documented "low-T attractor" producing
+    # impulsive single-step outputs (google-deepmind/gemma#647).
+    # Penalty knobs (repeat/presence/frequency) are NOT in the
+    # passport on purpose: they corrupt JSON-schema constrained
+    # outputs without curing repetition (vllm#40080, ollama#15502).
     default_temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     default_top_p: Mapped[float] = mapped_column(Float, default=0.9, nullable=False)
+    default_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_min_p: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Measured performance on this hardware (filled by /admin/models/{id}/bench)
     benchmark_tps: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -217,6 +217,9 @@ app.include_router(internal_runs_api.router)
 # PER-163: host-services launcher config endpoint
 from app.api import internal_chat_model as internal_chat_model_api  # noqa: E402
 app.include_router(internal_chat_model_api.router)
+# PER-164: dedicated UI-grounder (UI-TARS et al) — separate llama-server on :8081
+from app.api import internal_grounder as internal_grounder_api  # noqa: E402
+app.include_router(internal_grounder_api.router)
 app.include_router(hf_models_api.router)
 app.include_router(knowledge_api.router)
 app.include_router(run_mirror_api.router)

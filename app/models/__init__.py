@@ -39,6 +39,7 @@ from app.models.help import (
     HelpArticleSection,
     HelpArticleView,
 )
+from app.models.grounder_model import GrounderModel
 from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocument
 from app.models.llm_model import LLMModel
 from app.models.notification import Notification, WorkspaceInvitation
@@ -84,6 +85,7 @@ __all__ = [
     "DeviceConfig",
     "EMBEDDING_DIM",
     "Edge",
+    "GrounderModel",
     "KnowledgeChunk",
     "KnowledgeDocument",
     "LLMModel",
