@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,13 @@ from app.db import get_async_session
 from app.models.device_config import DeviceConfig
 from app.models.run import Edge, Run, RunStatus, Screen
 from app.models.user import User
+from app.schemas.pagination import (
+    DEFAULT_PER_PAGE,
+    MAX_PER_PAGE,
+    Paginated,
+    make_envelope,
+    paginate_query,
+)
 from app.schemas.run import (
     ReplayPathRequest,
     RunCreate,
@@ -68,18 +75,42 @@ async def _can_access_run(
     return False
 
 
-@router.get("", response_model=list[RunRead])
+@router.get("", response_model=Paginated[RunRead])
 async def list_runs(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID | None = None,
-) -> list[Run]:
-    """List runs.
+    page: int = Query(
+        1,
+        ge=1,
+        description=(
+            "1-indexed page number. Defaults to 1 — calls without "
+            "``?page=`` still work, just return the first page."
+        ),
+    ),
+    per_page: int = Query(
+        DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description=(
+            "Page size. Defaults to 50 (matches the default Runs table "
+            "render); capped at 200 to keep response payloads bounded."
+        ),
+    ),
+) -> dict:
+    """List runs (PER-184: paginated envelope).
 
     PER-106 #3: visibility is "admin sees all, otherwise you see runs
     you created OR runs in any workspace you belong to". Previously the
     no-filter branch only returned own-runs which silently hid teammates'
     work even though detail endpoints were happy to serve it.
+
+    PER-184: this is the pilot endpoint for ``Paginated[T]``. Workspaces
+    with 500+ runs used to ship 30+ MB JSON on every page open because
+    we serialised every row regardless of what the UI rendered. The
+    response is now an envelope (``items / total / page / per_page /
+    has_more``) and the underlying SQL adds OFFSET/LIMIT + a separate
+    COUNT(*) so the database does the slicing, not the application.
 
     If ``workspace_id`` is supplied, narrow to that workspace and verify
     membership up front so we can return a clean 403 instead of an empty
@@ -108,8 +139,8 @@ async def list_runs(
         else:
             q = q.where(Run.user_id == user.id)
 
-    result = await session.execute(q)
-    return list(result.scalars().all())
+    rows, total = await paginate_query(session, q, page, per_page)
+    return make_envelope(rows, total, page, per_page)
 
 
 @router.post(
