@@ -167,13 +167,25 @@ app = FastAPI(
     ],
 )
 
+# PER-178: CORS allow_origins from env CSV (CORS_ALLOWED_ORIGINS).
+# Default keeps dev workflow (vite on :3000) unchanged. Prod deploys
+# set the var to whatever real domains will serve the frontend; the
+# previous hardcoded localhost-only list silently broke remote hosts
+# until someone edited this file.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost"],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# PER-177: per-IP login rate limit. Only inspects /auth/jwt/login; every
+# other request bypasses with a single string compare. Custom impl
+# instead of slowapi because we have one path to gate and don't want
+# the extra dep.
+from app.middleware import LoginRateLimitMiddleware  # noqa: E402
+app.add_middleware(LoginRateLimitMiddleware)
 
 
 @app.get("/health", tags=["system"])

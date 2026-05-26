@@ -130,29 +130,47 @@ async def list_dictionaries(
     session: Annotated[AsyncSession, Depends(get_async_session)],
     workspace_id: UUID,
 ) -> list[CustomDictionary]:
+    """List dictionaries in a workspace, filtering restricted ones the
+    caller can't view.
+
+    PER-179: ACL check was N+1 — one SELECT for the dictionary list,
+    then one extra SELECT for *each* restricted dictionary to read the
+    caller's permission row. On workspaces with 30+ restricted
+    dictionaries this added 30+ round-trips per page render. Now a
+    single LEFT JOIN against ``custom_dictionary_permissions`` pulls
+    the dictionary and its ACL row (if any) in one shot; restriction
+    filtering happens in memory on the merged result.
+    """
     await _check_can_read_ws(workspace_id, user, session)
-    result = await session.execute(
-        select(CustomDictionary)
+
+    # Admin path keeps the legacy single-SELECT shape — there's no ACL
+    # to apply, so we don't need the join.
+    if _has_perm(user, "users.view"):
+        result = await session.execute(
+            select(CustomDictionary)
+            .where(CustomDictionary.workspace_id == workspace_id)
+            .order_by(CustomDictionary.name)
+        )
+        return list(result.scalars().all())
+
+    # Non-admin path: one LEFT JOIN replacing the previous 1 + N
+    # SELECT-per-restricted-dictionary loop.
+    Perm = CustomDictionaryPermission
+    rows = await session.execute(
+        select(CustomDictionary, Perm.can_view)
+        .outerjoin(
+            Perm,
+            (Perm.dictionary_id == CustomDictionary.id)
+            & (Perm.user_id == user.id),
+        )
         .where(CustomDictionary.workspace_id == workspace_id)
         .order_by(CustomDictionary.name)
     )
-    all_dicts = list(result.scalars().all())
-    # Filter restricted ones the user has no view perm on
-    if _has_perm(user, "users.view"):
-        return all_dicts
     visible: list[CustomDictionary] = []
-    for d in all_dicts:
+    for d, can_view in rows.all():
         if not d.is_restricted:
             visible.append(d)
-            continue
-        perm_res = await session.execute(
-            select(CustomDictionaryPermission).where(
-                CustomDictionaryPermission.dictionary_id == d.id,
-                CustomDictionaryPermission.user_id == user.id,
-            )
-        )
-        p = perm_res.scalar_one_or_none()
-        if p and p.can_view:
+        elif can_view:
             visible.append(d)
     return visible
 

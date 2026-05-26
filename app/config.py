@@ -51,6 +51,28 @@ class Settings(BaseSettings):
     initial_admin_email: str = ""
     initial_admin_password: str = ""
 
+    # PER-178: CORS — allowed origins for the SPA. Reads CSV from
+    # env CORS_ALLOWED_ORIGINS=https://app.example.com,https://...
+    # Default covers vite-dev (3000) and a plain http://localhost the
+    # frontend image serves under for local docker compose.
+    cors_allowed_origins_csv: str = "http://localhost:3000,http://localhost"
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        """Parse the CSV env into a list of origins.
+
+        Trims whitespace + drops empties. Pydantic's BaseSettings
+        doesn't natively parse lists from env vars without extra
+        ceremony; CSV + property is the smallest abstraction that
+        survives `.env` files, `docker compose` env: blocks, and
+        the runtime `os.environ` injection used in tests.
+        """
+        return [
+            o.strip()
+            for o in (self.cors_allowed_origins_csv or "").split(",")
+            if o.strip()
+        ]
+
     # LLM (chat completions) — used by the agent during exploration.
     # Default points at Gemma (small, fast, multimodal with mmproj).
     llm_base_url: str = "http://llm:8080"
