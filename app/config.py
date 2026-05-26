@@ -26,7 +26,22 @@ class Settings(BaseSettings):
     # (PER-106 #8) because environments that didn't override the env
     # var would have signed tokens with a publicly-known secret.
     jwt_secret: str = ""
-    jwt_access_token_expires_min: int = 15
+    # PER-142: access-token lifetime. Default raised from 15 → 480
+    # minutes (8 hours) because the original 15-min default + no
+    # silent-refresh meant every user re-logged in every 15 minutes
+    # for a full day of testing. The /auth/jwt/refresh endpoint now
+    # extends the active session (frontend interceptor calls it
+    # proactively before expiry), but operators should still pick a
+    # value that matches their session length — 480 is fair for dev,
+    # 60 is more conservative for production. The refresh endpoint
+    # caps the chain at whatever this value is (no separate refresh
+    # token), so a much shorter access-token lifetime in prod would
+    # need the cookie-based refresh follow-up (deferred).
+    jwt_access_token_expires_min: int = 480
+    # Unused as of PER-142's MVP refresh: there is no separate refresh
+    # token, so this setting has no code path. Left in place so future
+    # work that adds a refresh-token table can wire it without a
+    # config-shape change.
     jwt_refresh_token_expires_days: int = 7
 
     # Initial admin (created by seed on first startup if no users exist).

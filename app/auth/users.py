@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -14,6 +14,7 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 from fastapi_users.db import SQLAlchemyUserDatabase
+from pydantic import BaseModel
 
 from app.config import settings
 from app.db import async_session_maker
@@ -174,3 +175,48 @@ async def require_workspace_membership(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of this workspace",
         )
+
+
+# --- Refresh-token endpoint (PER-142) ----------------------------------------
+# fastapi-users 14.x does NOT ship a refresh-token flow. The original
+# `JWT_REFRESH_TOKEN_EXPIRES_DAYS=7` config was a placeholder that
+# never had a code path — so every 15 minutes (default access lifetime)
+# the user saw «Неверный email или пароль» and had to log in again.
+#
+# This implementation is deliberately the simplest viable refresh:
+# the endpoint requires a currently-valid access token (via
+# `current_active_user`) and mints a fresh one with the same full
+# lifetime. The frontend interceptor must call it proactively
+# (before the token actually expires) — there is no separate
+# refresh-token storage to fall back on once the access has died.
+#
+# Trade-off: simpler ops (no refresh-token table, no httpOnly cookies,
+# no rotation, no revocation list) at the cost of zero protection
+# against a stolen long-lived refresh-token. For a dev tool / on-prem
+# deployment where the alternative is an 8-hour access token AND no
+# refresh at all, this is a strict improvement. Production hardening
+# (cookie storage, rotation, revocation table) is a follow-up.
+
+refresh_router = APIRouter(prefix="/auth/jwt", tags=["auth"])
+
+
+class _RefreshOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@refresh_router.post("/refresh", response_model=_RefreshOut)
+async def refresh_access_token(
+    user: Annotated[User, Depends(current_active_user)],
+    strategy: Annotated[JWTStrategy, Depends(get_jwt_strategy)],
+) -> _RefreshOut:
+    """Issue a fresh access token for the authenticated user.
+
+    Requires a currently-valid access token in the Authorization
+    header (validated by `current_active_user`). Returns a new token
+    with the full configured lifetime. The frontend is expected to
+    call this proactively (before expiry) — once the access dies,
+    refresh dies with it and the user must re-login.
+    """
+    new_token = await strategy.write_token(user)
+    return _RefreshOut(access_token=new_token)

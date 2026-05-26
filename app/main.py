@@ -182,13 +182,19 @@ async def health() -> dict[str, str]:
 
 
 # --- Auth routes -------------------------------------------------------------
-# POST /auth/jwt/login  — email + password → JWT
-# POST /auth/jwt/logout — invalidate (client-side discard)
+# POST /auth/jwt/login   — email + password → JWT
+# POST /auth/jwt/logout  — invalidate (client-side discard)
+# POST /auth/jwt/refresh — PER-142: silent refresh of a still-valid access
+#                          token (own router; fastapi-users 14.x doesn't
+#                          provide one). Mounted at the same /auth/jwt
+#                          prefix to keep all auth verbs co-located.
 app.include_router(
     fastapi_users.get_auth_router(auth_backend),
     prefix="/auth/jwt",
     tags=["auth"],
 )
+from app.auth.users import refresh_router  # noqa: E402 — local import
+app.include_router(refresh_router)
 
 # NO register router — admins create users, not self-registration.
 
