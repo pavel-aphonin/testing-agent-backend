@@ -22,3 +22,7 @@ python-pptx>=0.6.0
 PyPDF2>=3.0.0
 odfpy>=1.4.0
 python-json-logger>=3.0.0
+# PER-183: optional Sentry SDK. Pulled in unconditionally so the
+# import path resolves; init_sentry() is the gate that actually
+# starts the SDK and only runs when SENTRY_DSN is non-empty.
+sentry-sdk[fastapi]>=2.18.0

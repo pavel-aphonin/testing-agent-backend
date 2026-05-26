@@ -214,6 +214,23 @@ class Settings(BaseSettings):
     app_uploads_dir: str = "/var/lib/app-uploads"
     app_max_upload_bytes: int = 500_000_000  # 500 MB
 
+    # PER-183: Sentry / observability.
+    # Lazy init — when ``sentry_dsn`` is empty (default) the SDK is
+    # never started and the app behaves exactly as before. Dev / on-prem
+    # installs without a Sentry org need no extra configuration.
+    # ``sentry_environment`` segments the issue feed (dev / staging /
+    # prod); ``sentry_release`` is the git SHA shipped from the build
+    # so stack traces in Sentry can be linked back to a specific commit.
+    sentry_dsn: str = ""
+    sentry_environment: str = "dev"
+    sentry_release: str = ""
+    # Trace sample rate is 0 by default — we ship the error tracking now
+    # and turn on performance monitoring as a follow-up. Anything > 0
+    # opts in to APM traces (cost: per-transaction overhead + Sentry
+    # quota), so it should be tuned per-environment, not left on dev
+    # defaults.
+    sentry_traces_sample_rate: float = 0.0
+
     # RAG / embeddings
     # Which model name (as registered with llama-swap) to ask for
     # text embeddings. EmbeddingClient retries the embedding endpoint

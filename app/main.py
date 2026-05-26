@@ -93,6 +93,19 @@ from app.logging_config import setup_logging  # noqa: E402
 
 setup_logging()
 
+# PER-183: start Sentry as soon as logging is wired but before any
+# request handler can fire. No-op when SENTRY_DSN is empty (the
+# common dev / on-prem case). Imported after setup_logging so the
+# "Sentry enabled/disabled" line lands on the right handler.
+from app.observability import init_sentry  # noqa: E402
+
+init_sentry(
+    settings.sentry_dsn,
+    environment=settings.sentry_environment,
+    release=settings.sentry_release,
+    traces_sample_rate=settings.sentry_traces_sample_rate,
+)
+
 logger = logging.getLogger(__name__)
 
 
