@@ -131,5 +131,22 @@ async def start_download(
     ``hf_downloader.download_and_register`` once the bytes actually
     land on disk.
     """
+    # PER-140: defence in depth — the BrowseHfModal table now hides
+    # the «Use this» action for mmproj-* files, but the API has to
+    # reject the same payload too. A scripted client or a stale
+    # browser cache could still POST {filename: "mmproj-F16.gguf"};
+    # we'd then create a broken llm_models row with name=mmproj and
+    # gguf_path pointing at the projector — no usable chat model.
+    # The mmproj filename is treated as a vision projector only when
+    # supplied via mmproj_filename — never as the main file.
+    if "mmproj" in payload.filename.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "mmproj-* files are vision projectors, not standalone "
+                "models. Pick a regular .gguf as the main file and "
+                "supply mmproj_filename separately."
+            ),
+        )
     download_id = spawn_download(payload, admin)
     return HfDownloadStarted(download_id=str(download_id))
