@@ -180,6 +180,13 @@ app = FastAPI(
     ],
 )
 
+# PER-180: install the typed-error/i18n exception handlers. Has to be
+# done after FastAPI() construction (it takes ``app`` as argument)
+# but before any router is included so middlewares + routers don't
+# race the handler registration.
+from app.errors import register_error_handlers  # noqa: E402
+register_error_handlers(app)
+
 # PER-178: CORS allow_origins from env CSV (CORS_ALLOWED_ORIGINS).
 # Default keeps dev workflow (vite on :3000) unchanged. Prod deploys
 # set the var to whatever real domains will serve the frontend; the

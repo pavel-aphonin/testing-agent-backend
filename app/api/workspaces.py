@@ -26,6 +26,7 @@ from app.config import settings
 
 from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
+from app.errors import ErrorCode, with_params
 from app.models.run import RunStatus
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember, WsRole
@@ -559,13 +560,14 @@ async def archive_workspace(
     ws = await _get_workspace(ws_id, session, include_archived=True)
     active = await _count_active_runs(ws_id, session)
     if active > 0 and not cancel_runs:
+        # PER-180: ErrorCode + i18n params. Handler localises the
+        # message per Accept-Language and surfaces ``count`` in
+        # ``params`` so the SPA can render its own banner if it wants
+        # something fancier than the default text.
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"В этом workspace ещё активны {active} run(s). "
-                f"Дождитесь завершения или повторите с "
-                f"?cancel_runs=true для массовой отмены."
-            ),
+            detail=ErrorCode.WORKSPACE_HAS_ACTIVE_RUNS,
+            headers=with_params(count=active),
         )
     if active > 0 and cancel_runs:
         await _cancel_active_runs(ws_id, session)
@@ -614,13 +616,12 @@ async def delete_workspace(
     ws = await _get_workspace(ws_id, session, include_archived=True)
     active = await _count_active_runs(ws_id, session)
     if active > 0 and not cancel_runs:
+        # PER-180: same ErrorCode as archive_workspace — same shape of
+        # failure, same shape of message.
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"В этом workspace ещё активны {active} run(s). "
-                f"Дождитесь завершения или повторите с "
-                f"?cancel_runs=true для массовой отмены."
-            ),
+            detail=ErrorCode.WORKSPACE_HAS_ACTIVE_RUNS,
+            headers=with_params(count=active),
         )
     if active > 0 and cancel_runs:
         await _cancel_active_runs(ws_id, session)
