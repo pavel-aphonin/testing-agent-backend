@@ -116,6 +116,15 @@ def _make_publishing_tqdm_class(
                 asyncio.run_coroutine_threadsafe(
                     publish_event(channel, event), loop
                 )
+                # PER-141: keep the in-process registry in sync so
+                # GET /api/admin/hf-models/downloads/active returns the
+                # latest bytes without having to subscribe to Redis.
+                _record_progress(
+                    download_id,
+                    file_label,
+                    state["downloaded"],
+                    int(self.total) if self.total else None,
+                )
             return ret
 
     return _PublishingTqdm
@@ -273,6 +282,10 @@ async def download_and_register(
                 "size_bytes": size_bytes,
             },
         )
+        # PER-141: record terminal status in the registry so that
+        # GET /downloads/active can show the "just completed" tail
+        # within the grace period (see _on_done in spawn_download).
+        _record_terminal(download_id, "done")
 
     except Exception as exc:
         logger.exception("HF download failed for %s", download_id)
@@ -284,15 +297,65 @@ async def download_and_register(
                 "error": str(exc),
             },
         )
+        _record_terminal(download_id, "error", str(exc)[:300])
 
 
-# --- registry for in-flight downloads (thin) -------------------------------
+# --- registry for in-flight downloads --------------------------------------
 #
-# Kept deliberately minimal. We only track tasks long enough to avoid
-# "coroutine was never awaited" warnings and to let the POST handler spit
-# back a download_id. Cancel/status/resume are deferred to a later
-# iteration.
-_active_downloads: dict[UUID, asyncio.Task[Any]] = {}
+# PER-141: registry was originally task-only — enough to keep asyncio
+# happy but not enough to let the UI re-attach to an in-flight download
+# after the modal closes. Now we store a richer record (payload, started
+# at, latest progress) so `GET /api/admin/hf-models/downloads/active`
+# can return the full state. The progress field is updated in-place by
+# publish_event() below; readers see a consistent snapshot under the
+# GIL even without explicit locking (single-write, multi-read pattern).
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class _DownloadState:
+    task: asyncio.Task[Any]
+    download_id: UUID
+    repo_id: str
+    filename: str
+    mmproj_filename: str | None
+    started_at: float = field(default_factory=time.time)
+    downloaded: int = 0
+    total: int | None = None
+    current_file: str | None = None
+    status: str = "running"  # running | done | error
+    error: str | None = None
+
+
+_active_downloads: dict[UUID, _DownloadState] = {}
+
+
+def _record_progress(
+    download_id: UUID, file_label: str, downloaded: int, total: int | None
+) -> None:
+    """PER-141: called from the progress publisher (publishing tqdm)
+    so the active-downloads registry stays in sync with the latest
+    bytes. Defensive — silently no-op if the download was removed
+    (race with completion)."""
+    state = _active_downloads.get(download_id)
+    if state is None:
+        return
+    state.current_file = file_label
+    state.downloaded = downloaded
+    if total is not None:
+        state.total = total
+
+
+def _record_terminal(download_id: UUID, status: str, error: str | None = None) -> None:
+    """PER-141: mark the registry row as terminal. Kept around for a
+    grace period so the UI can show "just completed" entries without
+    racing the cleanup callback below."""
+    state = _active_downloads.get(download_id)
+    if state is None:
+        return
+    state.status = status
+    state.error = error
 
 
 def spawn_download(payload: HfDownloadRequest, user: User) -> UUID:
@@ -302,8 +365,51 @@ def spawn_download(payload: HfDownloadRequest, user: User) -> UUID:
         download_and_register(payload, download_id, user),
         name=f"hf-download-{download_id}",
     )
-    _active_downloads[download_id] = task
-    # Auto-deregister when the task is done, whether success or failure,
-    # so the dict doesn't grow unbounded.
-    task.add_done_callback(lambda _t: _active_downloads.pop(download_id, None))
+    _active_downloads[download_id] = _DownloadState(
+        task=task,
+        download_id=download_id,
+        repo_id=payload.repo_id,
+        filename=payload.filename,
+        mmproj_filename=payload.mmproj_filename,
+    )
+
+    # PER-141: keep finished entries in the registry for 10 minutes
+    # so the UI can show "recently completed" downloads next time the
+    # admin opens BrowseHfModal. After that the row is purged.
+    _GRACE_SECONDS = 600
+
+    def _on_done(_t: asyncio.Task[Any]) -> None:
+        state = _active_downloads.get(download_id)
+        if state is None:
+            return
+        # If the task raised, _record_terminal won't have been called
+        # from inside download_and_register's except block — set it
+        # here as the safety net.
+        if state.status == "running":
+            try:
+                _t.result()  # re-raise so we can inspect the exception
+                state.status = "done"
+            except Exception as exc:  # noqa: BLE001
+                state.status = "error"
+                state.error = str(exc)[:300]
+
+        async def _purge() -> None:
+            await asyncio.sleep(_GRACE_SECONDS)
+            _active_downloads.pop(download_id, None)
+
+        try:
+            asyncio.get_running_loop().create_task(_purge())
+        except RuntimeError:
+            # Loop already closed (process shutdown). Just pop now.
+            _active_downloads.pop(download_id, None)
+
+    task.add_done_callback(_on_done)
     return download_id
+
+
+def snapshot_active_downloads() -> list[_DownloadState]:
+    """PER-141: return a stable list of all currently-tracked downloads
+    (running + recently completed within the grace window). Caller
+    typically converts to a Pydantic response — see /api/admin/hf-models/
+    downloads/active in api/hf_models.py."""
+    return list(_active_downloads.values())

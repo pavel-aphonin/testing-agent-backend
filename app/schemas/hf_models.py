@@ -70,3 +70,25 @@ class HfDownloadStarted(BaseModel):
     """Response from POST /download: ID the client uses to open the WS."""
 
     download_id: str
+
+
+class HfActiveDownload(BaseModel):
+    """One in-flight (or recently completed) HuggingFace download.
+
+    PER-141: returned by `GET /api/admin/hf-models/downloads/active` so
+    the admin UI can re-attach to a download whose modal was closed
+    mid-flight. Includes the just-completed tail (within a grace
+    window) so "did my download succeed?" is answerable without
+    grepping logs.
+    """
+
+    download_id: str
+    repo_id: str
+    filename: str
+    mmproj_filename: str | None = None
+    started_at: float  # Unix timestamp (seconds)
+    current_file: str | None = None
+    downloaded: int = 0
+    total: int | None = None
+    status: str  # "running" | "done" | "error"
+    error: str | None = None

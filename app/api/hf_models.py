@@ -20,12 +20,13 @@ from huggingface_hub.utils import HfHubHTTPError, RepositoryNotFoundError
 from app.auth.users import require_admin
 from app.models.user import User
 from app.schemas.hf_models import (
+    HfActiveDownload,
     HfDownloadRequest,
     HfDownloadStarted,
     HfFile,
     HfRepoSummary,
 )
-from app.services.hf_downloader import spawn_download
+from app.services.hf_downloader import snapshot_active_downloads, spawn_download
 
 logger = logging.getLogger(__name__)
 
@@ -150,3 +151,39 @@ async def start_download(
         )
     download_id = spawn_download(payload, admin)
     return HfDownloadStarted(download_id=str(download_id))
+
+
+@router.get("/downloads/active", response_model=list[HfActiveDownload])
+async def list_active_downloads(
+    _admin: Annotated[User, Depends(require_admin)],
+) -> list[HfActiveDownload]:
+    """PER-141: list every download the backend is currently tracking
+    plus recently completed ones (within the 10-minute grace window).
+
+    Lets BrowseHfModal re-attach to a download whose modal was closed
+    mid-flight. Without this the admin's only recovery option was a
+    second download of the same 22-GB GGUF or asking a developer to
+    grep ``.cache/huggingface/download``.
+
+    Returns the snapshot in start-order (oldest first). The frontend
+    sorts/filters as it likes — typically «running» first, then
+    «done» / «error» tail.
+    """
+    out: list[HfActiveDownload] = []
+    for state in snapshot_active_downloads():
+        out.append(
+            HfActiveDownload(
+                download_id=str(state.download_id),
+                repo_id=state.repo_id,
+                filename=state.filename,
+                mmproj_filename=state.mmproj_filename,
+                started_at=state.started_at,
+                current_file=state.current_file,
+                downloaded=state.downloaded,
+                total=state.total,
+                status=state.status,
+                error=state.error,
+            )
+        )
+    out.sort(key=lambda d: d.started_at)
+    return out
