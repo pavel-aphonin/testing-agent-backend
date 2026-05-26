@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from app.config import settings
 
 from app.auth.users import current_active_user, require_permission
 from app.db import get_async_session
+from app.models.run import RunStatus
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember, WsRole
 from app.schemas.workspace import (
@@ -476,13 +477,98 @@ async def admin_list_workspaces(
     return list(result.scalars().all())
 
 
+# PER-186: statuses that represent an in-flight run. Anything in this
+# set is what stops a workspace from being archived without an explicit
+# ``?cancel_runs=true``. Keep in sync with RunStatus — these are the
+# non-terminal ones; COMPLETED / FAILED / CANCELLED are safe to leave
+# behind because the worker has already let go.
+_ACTIVE_RUN_STATUSES: tuple[str, ...] = (
+    RunStatus.PENDING.value,
+    RunStatus.RUNNING.value,
+)
+
+
+async def _count_active_runs(ws_id: UUID, session: AsyncSession) -> int:
+    """How many runs are still actively held by a worker?
+
+    PER-186: archiving a workspace while a worker is mid-run leaves
+    the worker tap-typing into a sim that the UI says doesn't exist
+    any more. The pre-archive check counts these and refuses the
+    archive unless the caller opted into mass-cancel.
+    """
+    from sqlalchemy import func as _func
+    from app.models.run import Run
+
+    res = await session.execute(
+        select(_func.count(Run.id)).where(
+            Run.workspace_id == ws_id,
+            Run.status.in_(_ACTIVE_RUN_STATUSES),
+        )
+    )
+    return int(res.scalar_one() or 0)
+
+
+async def _cancel_active_runs(ws_id: UUID, session: AsyncSession) -> int:
+    """Mark every active run in the workspace as cancelled. Returns
+    the count. PER-186: counterpart to ``_count_active_runs`` used
+    when the caller passed ``?cancel_runs=true``."""
+    from sqlalchemy import update as _update
+    from datetime import datetime, timezone
+    from app.models.run import Run
+
+    result = await session.execute(
+        _update(Run)
+        .where(
+            Run.workspace_id == ws_id,
+            Run.status.in_(_ACTIVE_RUN_STATUSES),
+        )
+        .values(
+            status=RunStatus.CANCELLED.value,
+            finished_at=datetime.now(timezone.utc),
+            error_message=(
+                "Workspace archived while this run was active"
+            ),
+        )
+    )
+    return int(result.rowcount or 0)
+
+
 @admin_router.post("/{ws_id}/archive", response_model=WorkspaceRead)
 async def archive_workspace(
     ws_id: UUID,
     _user: Annotated[User, Depends(require_permission("dictionaries.edit"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    cancel_runs: bool = Query(
+        False,
+        description=(
+            "If true, any still-active runs in this workspace are "
+            "cancelled before the archive succeeds. Without this flag "
+            "an archive attempt on a workspace with active runs returns "
+            "409 with the count."
+        ),
+    ),
 ) -> Workspace:
+    """Archive a workspace.
+
+    PER-186 guard: if any runs are still active (pending / running),
+    refuse with 409 unless the operator explicitly asked to cancel
+    them via ``?cancel_runs=true``. Without this check the worker
+    kept processing a run whose workspace was «gone» from the UI's
+    point of view — wasted compute + confused diagnostic.
+    """
     ws = await _get_workspace(ws_id, session, include_archived=True)
+    active = await _count_active_runs(ws_id, session)
+    if active > 0 and not cancel_runs:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"В этом workspace ещё активны {active} run(s). "
+                f"Дождитесь завершения или повторите с "
+                f"?cancel_runs=true для массовой отмены."
+            ),
+        )
+    if active > 0 and cancel_runs:
+        await _cancel_active_runs(ws_id, session)
     ws.is_archived = True
     await session.commit()
     await session.refresh(ws)
@@ -507,7 +593,40 @@ async def delete_workspace(
     ws_id: UUID,
     _user: Annotated[User, Depends(require_permission("dictionaries.delete"))],
     session: Annotated[AsyncSession, Depends(get_async_session)],
+    cancel_runs: bool = Query(
+        False,
+        description=(
+            "If true, any still-active runs in this workspace are "
+            "cancelled before the delete succeeds. Without this flag "
+            "a delete attempt on a workspace with active runs returns "
+            "409 with the count."
+        ),
+    ),
 ) -> None:
+    """Permanently delete a workspace.
+
+    PER-186 guard: like ``archive_workspace``, refuse when active runs
+    are still held by a worker — unless the caller explicitly opted
+    into ``?cancel_runs=true``. CASCADE on the FK takes care of the
+    cleanup once cancellation is in place, but cancelling first lets
+    the worker observe a clean terminal state instead of «row gone».
+    """
     ws = await _get_workspace(ws_id, session, include_archived=True)
+    active = await _count_active_runs(ws_id, session)
+    if active > 0 and not cancel_runs:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"В этом workspace ещё активны {active} run(s). "
+                f"Дождитесь завершения или повторите с "
+                f"?cancel_runs=true для массовой отмены."
+            ),
+        )
+    if active > 0 and cancel_runs:
+        await _cancel_active_runs(ws_id, session)
+        # Flush so the cancellation is visible before the cascade
+        # delete kicks in — otherwise the worker hits a row that no
+        # longer exists while still holding it active in memory.
+        await session.flush()
     await session.delete(ws)
     await session.commit()
