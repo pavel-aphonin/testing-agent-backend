@@ -24,6 +24,7 @@ from app.api import hf_models as hf_models_api
 from app.api import internal_runs as internal_runs_api
 from app.api import knowledge as knowledge_api
 from app.api import llm_models as llm_models_api
+from app.api import internal_module_assignments as internal_module_assignments_api
 from app.api import module_assignments as module_assignments_api
 from app.api import run_mirror as run_mirror_api
 from app.api import profile as profile_api
@@ -253,6 +254,7 @@ app.include_router(admin_users_api.router)
 app.include_router(llm_models_api.admin_router)
 app.include_router(llm_models_api.public_router)
 app.include_router(module_assignments_api.router)
+app.include_router(internal_module_assignments_api.router)
 app.include_router(agent_settings_api.router)
 app.include_router(profile_api.router)
 app.include_router(internal_runs_api.router)
