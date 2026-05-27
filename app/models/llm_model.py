@@ -31,7 +31,7 @@ class LLMModel(Base):
     # Identity
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    family: Mapped[str] = mapped_column(String(50), nullable=False)  # "gemma-4", "qwen-3.5"
+    family: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. "gui-owl-1.5", "ui-tars-1.5", "qwen3"
 
     # Files (paths inside the shared volume)
     gguf_path: Mapped[str] = mapped_column(Text, nullable=False)

@@ -1,10 +1,13 @@
-"""Seed script: on first startup, create the initial admin and the two
-pre-installed LLM models (Gemma 4 E4B + Qwen 3.5 35B-A3B) if they're missing.
+"""Seed script: on first startup, create the initial admin and (used to)
+pre-install Gemma 4 E4B + Qwen 3.5 35B-A3B.
 
-Both models were released by Google DeepMind / Alibaba on April 7, 2026
-and are downloaded into LLM_MODELS_DIR by ``make download-models``. The
-filenames here MUST match what that script writes to disk, otherwise
-llama-swap won't be able to spawn the corresponding llama-server process.
+PER-192 (PER-175 Phase 1A): the seed list is now empty. The 12-module
+architecture replaces those two monolithic models with a roster of
+specialized small models (Planner/Grounder/Memory/Safety/Ambiguity/…)
+that operators pick via the admin UI and ModuleAssignment table
+(see PER-193). The agent is intentionally dev-only and non-functional
+until that migration completes — `seed_initial_models()` therefore
+seeds nothing and just logs a hint.
 """
 
 from fastapi_users.exceptions import UserAlreadyExists
@@ -21,47 +24,18 @@ from app.models.user import User
 from app.schemas.user import UserCreate
 
 
-INITIAL_MODELS = [
-    {
-        "name": "gemma-4-e4b",
-        "family": "gemma-4",
-        "description": (
-            "Gemma 4 E4B (4.5B effective params, 8B with embeddings). "
-            "Released April 7, 2026 by Google DeepMind. 128K context, "
-            "vision input, tool use, audio, 140+ languages. The fast "
-            "classifier in Hybrid mode — sets PUCT priors over UI elements."
-        ),
-        "gguf_path": "/var/lib/llm-models/gemma-4-E4B-it-Q4_K_M.gguf",
-        "mmproj_path": "/var/lib/llm-models/gemma-4-E4B-it-mmproj-F16.gguf",
-        "size_bytes": 5_100_000_000,
-        "context_length": 131_072,
-        "quantization": "Q4_K_M",
-        "supports_vision": True,
-        "supports_tool_use": True,
-        "default_temperature": 0.4,
-        "default_top_p": 0.9,
-    },
-    {
-        "name": "qwen3.5-35b-a3b",
-        "family": "qwen-3.5",
-        "description": (
-            "Qwen 3.5 35B-A3B (MoE: 35B total, 3B active per token). "
-            "Released April 7, 2026 by Alibaba. Inference speed close to a "
-            "dense 3B model despite the 35B parameter count. 262K context, "
-            "vision, tool use, reasoning. The smart actor in AI mode and "
-            "the analyzer for Phase 2 graph review."
-        ),
-        "gguf_path": "/var/lib/llm-models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf",
-        "mmproj_path": "/var/lib/llm-models/Qwen3.5-35B-A3B-mmproj-F16.gguf",
-        "size_bytes": 22_200_000_000,
-        "context_length": 262_144,
-        "quantization": "UD-Q4_K_XL",
-        "supports_vision": True,
-        "supports_tool_use": True,
-        "default_temperature": 0.6,
-        "default_top_p": 0.9,
-    },
-]
+# PER-192: emptied for the 12-module migration. Historical entries
+# (Gemma 4 E4B, Qwen 3.5 35B-A3B) are preserved in git history and
+# in the data-migration script (alembic 20260527_per192_*) so they
+# can be reinstated by an operator if the rollout has to be reverted.
+#
+# The new roster (Planner=GUI-Owl-1.5-4B, Grounder=UI-TARS-1.5-7B,
+# Safety=Llama-Guard-3-1B, Memory=Qwen3-Embedding-0.6B,
+# Ambiguity=Qwen3-4B-Instruct-2507, etc.) is *not* seeded — operators
+# download via the HF browser and assign per-role via the
+# ModuleAssignment table (PER-193). Pre-seeding would defeat the
+# whole point of the "operator picks per role" UI.
+INITIAL_MODELS: list[dict] = []
 
 
 async def seed_initial_admin() -> None:
@@ -681,21 +655,36 @@ async def seed_release_notes() -> None:
 
 
 async def seed_initial_models() -> None:
-    """Insert the two pre-installed LLM models if they're not in the table yet."""
-    inserted_any = False
-    async with async_session_maker() as session:
-        for spec in INITIAL_MODELS:
-            existing = await session.execute(
-                select(LLMModel).where(LLMModel.name == spec["name"])
-            )
-            if existing.scalar_one_or_none() is not None:
-                print(f"[seed] LLM model {spec['name']} already exists.")
-                continue
-            session.add(LLMModel(**spec, is_active=True))
-            inserted_any = True
-            print(f"[seed] Created LLM model: {spec['name']}")
-        await session.commit()
+    """Insert pre-installed LLM models (PER-192: now a no-op).
 
+    The seed list is intentionally empty during the PER-175 12-module
+    migration — operators download role-specific models via the HF
+    browser and assign per-role via the ModuleAssignment UI. We still
+    regenerate the swap config (covers any models the operator has
+    already created via the API) so llama-swap doesn't get out of sync.
+    """
+    if not INITIAL_MODELS:
+        print(
+            "[seed] No initial models to insert (PER-192 / PER-175 migration). "
+            "Operator must add models via /admin/models or download via HF "
+            "browser, then assign roles via /admin/module-assignments."
+        )
+    else:
+        async with async_session_maker() as session:
+            for spec in INITIAL_MODELS:
+                existing = await session.execute(
+                    select(LLMModel).where(LLMModel.name == spec["name"])
+                )
+                if existing.scalar_one_or_none() is not None:
+                    print(f"[seed] LLM model {spec['name']} already exists.")
+                    continue
+                session.add(LLMModel(**spec, is_active=True))
+                print(f"[seed] Created LLM model: {spec['name']}")
+            await session.commit()
+
+    # Regenerate swap config either way — picks up any operator-added
+    # models that aren't in the seed list.
+    async with async_session_maker() as session:
         try:
             await regenerate_swap_config(session)
             print(f"[seed] Wrote {settings.llm_swap_config_path}")

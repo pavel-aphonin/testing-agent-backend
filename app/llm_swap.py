@@ -18,8 +18,8 @@ The shape of the YAML follows the upstream example::
     listen: ":8080"
     healthCheckTimeout: 60
     models:
-      gemma-4-e4b:
-        cmd: llama-server -m /var/lib/llm-models/gemma-4-e4b-it-Q4_K_M.gguf
+      gui-owl-1.5-4b:
+        cmd: llama-server -m /var/lib/llm-models/GUI-Owl-1.5-4B-Q4_K_M.gguf
                           --ctx-size 131072 --port 8180 --jinja
         proxy: http://localhost:8180
         checkEndpoint: /health
