@@ -42,6 +42,11 @@ from app.models.help import (
 from app.models.grounder_model import GrounderModel
 from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk, KnowledgeDocument
 from app.models.llm_model import LLMModel
+from app.models.module_assignment import (
+    ALL_MODULE_ROLES,
+    ModuleAssignment,
+    ModuleRole,
+)
 from app.models.notification import Notification, WorkspaceInvitation
 from app.models.notification_type import NotificationType, WorkspaceNotificationSetting
 from app.models.release_note import ReleaseNote, ReleaseNoteDismissal
@@ -89,6 +94,9 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeDocument",
     "LLMModel",
+    "ALL_MODULE_ROLES",
+    "ModuleAssignment",
+    "ModuleRole",
     "Notification",
     "NotificationType",
     "Role",

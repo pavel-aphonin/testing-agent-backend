@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -133,6 +133,24 @@ class LLMModel(Base):
     # Measured performance on this hardware (filled by /admin/models/{id}/bench)
     benchmark_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
     benchmark_ttft_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # PER-193: which agent roles this model is *eligible* to fill.
+    # Empty array = legacy / general-purpose (assignable to any role
+    # the operator picks — the admin UI just warns "no declared
+    # specialisation"). When non-empty, the role picker scopes its
+    # choices to models that declare support, so a tiny zero-shot
+    # classifier can't accidentally be assigned to PLANNER.
+    #
+    # Values are strings from ``ModuleRole.value`` to keep the
+    # column dialect-portable (Postgres ARRAY of strings vs. an
+    # enum array which would force a migration on every role
+    # addition). Worker side reads the same enum to validate.
+    supported_roles: Mapped[list[str]] = mapped_column(
+        ARRAY(String(50)),
+        nullable=False,
+        default=list,
+        server_default="{}",
+    )
 
     # Visibility
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

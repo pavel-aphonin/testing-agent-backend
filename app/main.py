@@ -24,6 +24,7 @@ from app.api import hf_models as hf_models_api
 from app.api import internal_runs as internal_runs_api
 from app.api import knowledge as knowledge_api
 from app.api import llm_models as llm_models_api
+from app.api import module_assignments as module_assignments_api
 from app.api import run_mirror as run_mirror_api
 from app.api import profile as profile_api
 from app.api import run_ws as run_ws_api
@@ -64,6 +65,7 @@ from app.models import (  # noqa: F401  registers all tables on Base.metadata
     KnowledgeChunk,
     KnowledgeDocument,
     LLMModel,
+    ModuleAssignment,
     Role,
     Run,
     Notification,
@@ -176,6 +178,7 @@ app = FastAPI(
         {"name": "admin-workspaces", "description": "Администрирование пространств."},
         {"name": "knowledge", "description": "База знаний для RAG."},
         {"name": "llm-models", "description": "Управление моделями LLM."},
+        {"name": "admin-module-assignments", "description": "Назначение моделей на роли агентного пайплайна (PER-175)."},
         {"name": "websocket", "description": "Live-стримы прогресса и событий."},
     ],
 )
@@ -249,6 +252,7 @@ app.include_router(devices_api.admin_router)
 app.include_router(admin_users_api.router)
 app.include_router(llm_models_api.admin_router)
 app.include_router(llm_models_api.public_router)
+app.include_router(module_assignments_api.router)
 app.include_router(agent_settings_api.router)
 app.include_router(profile_api.router)
 app.include_router(internal_runs_api.router)
