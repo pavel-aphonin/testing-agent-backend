@@ -13,7 +13,7 @@ Three changes in one revision:
    for every role on a fresh DB.
 3. Unique constraint on ``role`` — one-row-per-role invariant.
 
-Revision ID: 20260527_per193_module_assignments
+Revision ID: 20260527_per193_mod_assign
 Revises: 20260527_per192_drop_seed
 Create Date: 2026-05-27
 """
@@ -26,7 +26,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-revision = "20260527_per193_module_assignments"
+revision = "20260527_per193_mod_assign"
 down_revision = "20260527_per192_drop_seed"
 branch_labels = None
 depends_on = None
