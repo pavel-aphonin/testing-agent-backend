@@ -106,10 +106,15 @@ def upgrade() -> None:
     # self-contained: a fresh DB has all 11 rows after a single
     # ``alembic upgrade head``.
     for role in _ROLES:
+        # Cast :id to uuid explicitly — asyncpg can't infer the type
+        # from a bound parameter when the column is uuid and the
+        # Python value is str. Alternative would be passing a real
+        # UUID object via SQLAlchemy's ORM session, but raw text+cast
+        # keeps the migration file standalone (no model imports).
         op.execute(
             sa.text(
                 "INSERT INTO module_assignments (id, role, llm_model_id) "
-                "VALUES (:id, :role, NULL)"
+                "VALUES (CAST(:id AS uuid), :role, NULL)"
             ).bindparams(
                 sa.bindparam("id", value=str(uuid.uuid4())),
                 sa.bindparam("role", value=role),
