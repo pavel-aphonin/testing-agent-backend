@@ -56,7 +56,17 @@ def _build_model_entry(model: LLMModel, port: int) -> dict:
     The cmd line is built with ``shlex.join`` so paths with spaces survive,
     even though we don't expect any. ``--jinja`` enables the Jinja chat
     template that ships in modern GGUF files (Gemma 4, Qwen 3.5, etc.).
+
+    PER-201 #1: Llama-Guard-3 is the exception. Its bundled chat template
+    raises ``Conversation roles must alternate user/assistant`` under
+    llama.cpp's Jinja parser because Llama-Guard is fed a single user
+    turn (the safety prompt), not an alternating dialogue. For that
+    family we drop ``--jinja`` and pin ``--chat-template chatml`` so the
+    server boots. Detected by family prefix so any Llama-Guard quant
+    variant is covered.
     """
+    is_llama_guard = (model.family or "").lower().startswith("llama-guard")
+
     cmd_parts: list[str] = [
         "llama-server",
         "-m",
@@ -65,8 +75,11 @@ def _build_model_entry(model: LLMModel, port: int) -> dict:
         str(model.context_length),
         "--port",
         str(port),
-        "--jinja",
     ]
+    if is_llama_guard:
+        cmd_parts += ["--no-jinja", "--chat-template", "chatml"]
+    else:
+        cmd_parts += ["--jinja"]
     if model.mmproj_path:
         cmd_parts += ["--mmproj", model.mmproj_path]
 
